@@ -176,13 +176,14 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         upper = int(student["max_credits"]) if student.get("max_credits") is not None else 18
     ensure(type(lower) is int and type(upper) is int and 1 <= lower <= upper <= 30,
            "학점 범위는 1~30 사이의 정수로 입력해주세요.")
-    required = request_codes(request, "required")
-    preferred = request_codes(request, "preferred") - required
+    excluded = request_codes(request, "excluded")
+    required = request_codes(request, "required") - excluded
+    preferred = request_codes(request, "preferred") - required - excluded
     locked = request.get("locked_offering_ids", [])
     ensure(isinstance(locked, list) and len(locked) <= 30
            and all(isinstance(item, str) and 0 < len(item) <= 100 for item in locked),
            "고정 분반 목록을 확인해주세요.")
-    locked = set(locked)
+    locked = {item for item in locked if item.partition(":")[2].partition(":")[0] not in excluded}
     blocked = request.get("blocked_days", [])
     ensure(isinstance(blocked, list) and all(isinstance(day, str) and day in tuple(DAYS) for day in blocked),
            "제외할 요일을 확인해주세요.")
@@ -206,6 +207,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     unknown_times = set()
     for section in pool:
         code = section["course_code"]
+        if code in excluded:
+            continue
         candidate = candidates.get(code, {})
         rule_ids = candidate.get("requirement_ids", ())
         explicitly_selected = code in required or code in preferred or section["offering_id"] in locked

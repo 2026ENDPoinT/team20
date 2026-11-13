@@ -86,6 +86,7 @@ class Handler(BaseHTTPRequestHandler):
             tags, aliases, _ = load_tags()
             return self.respond(200, {
                 'csrf_token': self.server.token,
+                'schedule_course_exclusions': True,
                 'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
                 'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
             })

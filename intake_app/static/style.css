@@ -62,6 +62,12 @@ main { max-width: 1152px; margin: auto; padding: clamp(24px, 6vw, 64px) 24px 56p
 .result-panel > summary .count { margin-left: auto; }
 .result-panel .result-body { padding: 4px 18px 18px; }
 .result-panel h3 { font-size: 16px; margin: 14px 0 8px; }
+.major-required-current > h3, .major-required-future > summary { padding:8px 10px; border-radius:4px; font-size:14px; font-weight:700; }
+.major-required-current > h3 { margin:8px 0 0; background:var(--tint); color:var(--primary-dark); }
+.major-required-future { margin:8px 0; border:1px solid var(--line); border-radius:4px; }
+.major-required-future > summary { background:var(--paper); }
+.major-required-future-body { padding:0 10px 8px; }
+.major-required-current > h4, .major-required-future-body > h4 { margin:12px 0 6px; font-size:15px; }
 .result-panel .table-wrap { margin-bottom: 8px; }
 .course-title { font-weight: 750; }
 .reason-highlight { color: var(--primary-dark); background: var(--tint); border-radius: 4px; padding: 1px 6px; }
@@ -236,7 +242,7 @@ dialog[open],.step-panel:not([hidden]),.result-panel[open] .result-body,.results
 .schedule-rec-group > summary span { margin-left:4px; color:var(--muted); font-weight:400; }
 .schedule-rec-group + .schedule-rec-group { margin-top:8px; }
 .schedule-req-group { padding:12px 4px 0; }
-.schedule-req-group h3, .schedule-section-header h3 { font-size:15px; }
+.schedule-req-group h3, .schedule-req-group h4, .schedule-section-header h3 { margin:0; font-size:15px; }
 .schedule-req-group > small { color:var(--muted); }
 #schedule-section-picker { position:absolute; z-index:2; inset:0 0 auto; display:flex; flex-direction:column; max-height:min(62dvh, 480px); overflow:hidden; background:var(--surface); border:1px solid var(--line); border-radius:8px; box-shadow:0 12px 32px #19263526; }
 .schedule-section-header { display:flex; gap:8px; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--line); }
