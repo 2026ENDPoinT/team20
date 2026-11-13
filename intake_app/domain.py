@@ -79,8 +79,6 @@ def validate_document(value, final=False):
     target = term(student.get('target_term'), nullable=True)
     program = student.get('program_type')
     ensure(program in (None, 'standard_single_major_day', 'other'), '이수 과정을 확인하세요.')
-    if final and schema == 2:
-        ensure(program is not None, '이수 과정을 선택하세요.')
     ensure(year is None or target is None or int(target[:4]) >= year, '추천 대상 학기가 입학연도보다 빠릅니다.')
     profile = dict(department_id=department, admission_year=year, grade=grade,
         admission_type=admission_type, program_type=program, target_term=target,
@@ -146,7 +144,7 @@ def document_warnings(document):
     for row in document['course_attempts']:
         key = (row['term'], re.sub(r'\s+', '', row['course_name']).casefold())
         if key in seen and key[1]:
-            notes.append(f'같은 학기의 동명 과목 확인: {row["course_name"]}. 필요하면 화면에서 묶어주세요.')
+            notes.append(f'같은 학기의 동명 과목 확인: {row["course_name"]}. 중복 입력 여부를 확인해주세요.')
         seen.add(key)
     return list(dict.fromkeys(notes))
 

@@ -15,6 +15,7 @@ from .domain import ValidationError, ensure, validate_document, document_warning
 from .imports import apply_import, check_import_sources, prepare_import, replace_import
 from .offerings import compare_offerings
 from .recommendations import recommend
+from .interest_tags import load_tags
 from .store import Store, ConflictError
 
 BASE = Path(__file__).resolve().parent
@@ -73,7 +74,12 @@ class Handler(BaseHTTPRequestHandler):
             filename, mime = static[path]
             return self.send_bytes(200, (BASE / 'static' / filename).read_bytes(), mime + '; charset=utf-8')
         if path == '/api/config':
-            return self.respond(200, {'csrf_token': self.server.token})
+            tags, aliases, _ = load_tags()
+            return self.respond(200, {
+                'csrf_token': self.server.token,
+                'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
+                'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
+            })
         if path == '/api/input':
             saved = self.server.store.load()
             if saved['document'] is not None:
@@ -114,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
             final = value.get('reviewed', False)
             ensure(type(final) is bool, '입력 확인 상태 오류')
             document = validate_document(value.get('document'), final=final)
+            for key in ('min_credits', 'max_credits'):
+                credits = document['student'][key]
+                ensure(credits is None or credits == int(credits), '희망학점은 정수로 입력해주세요.')
             saved = self.load_version(version)
             check_import_sources(document, saved['document'])
             result = self.server.store.save(document, version, reviewed=final)
@@ -143,6 +152,16 @@ class Handler(BaseHTTPRequestHandler):
             collection = self.server.collector(url, timeout=180)
             self.load_version(version)
             preview, hashes = prepare_import(collection, document, saved['import_origins'])
+            if value.get('official_only') is True:
+                try:
+                    matches = compare_offerings(self.server.official_db, preview, require_completion=False)
+                except (sqlite3.Error, OSError, ValueError):
+                    return self.respond(503, {'error': '공식 개설강좌 DB를 읽을 수 없습니다.'})
+                confirmed = {item['course_attempt_id'] for item in matches if item['status'] == 'offering_matched'}
+                preview['official_excluded_count'] = len(matches) - len(confirmed)
+                preview['course_attempts'] = [row for row in preview['course_attempts'] if row['id'] in confirmed]
+                preview['changes'] = [row for row in preview['changes'] if row['incoming_attempt_id'] in confirmed]
+                hashes = {key: value for key, value in hashes.items() if key in confirmed}
             now = monotonic()
             cache = self.server.previews
             for key in list(cache):

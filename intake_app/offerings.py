@@ -68,12 +68,13 @@ def recommendation_data(database, document):
         return target, matches, offerings
 
 
-def compare_offerings(database, document):
+def compare_offerings(database, document, *, require_completion=True):
     with closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         db.row_factory = sqlite3.Row
         db.execute('BEGIN')
         snapshots = active_snapshots(db)
-        return [compare_attempt(db, snapshots, row) for row in document['course_attempts']]
+        return [compare_attempt(db, snapshots, row, require_completion=require_completion)
+                for row in document['course_attempts']]
 
 
 def active_snapshots(db):
@@ -83,11 +84,11 @@ def active_snapshots(db):
     ''')}
 
 
-def compare_attempt(db, snapshots, row, *, include_metadata=False, check_in_progress=False):
+def compare_attempt(db, snapshots, row, *, include_metadata=False, check_in_progress=False, require_completion=True):
     result = dict(course_attempt_id=row['id'], status='pending', reason=None, offering=None, candidates=[])
     status = row['completion_status']
-    if (row['source'] == 'sample' or not row['user_confirmed']
-            or (status != 'completed' and not (check_in_progress and status == 'in_progress'))):
+    if require_completion and (row['source'] == 'sample' or not row['user_confirmed']
+                               or (status != 'completed' and not (check_in_progress and status == 'in_progress'))):
         return dict(result, status='not_checked', reason='completion_not_confirmed')
     snapshot = snapshots.get(school_term(row['term']))
     if snapshot is None:

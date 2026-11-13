@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .domain import ensure
-from .interest_tags import classify, load_tags
+from .interest_tags import OTHER, classify, load_tags
 from .offerings import normalized_name, recommendation_data, school_term
 
 DATA = Path(__file__).resolve().parents[1] / 'data' / 'graduation_requirements'
@@ -180,6 +180,9 @@ def eligibility(offering):
 
 def recommend(database, document):
     student = document['student']
+    if student.get('program_type') is None:
+        student = dict(student, program_type='standard_single_major_day')
+        document = dict(document, student=student)
     year, grade = student.get('admission_year'), student.get('grade')
     ensure(year and grade, '입학연도와 현재 학년을 입력해주세요.')
     ensure(2021 <= year <= 2026 and student['admission_type'] == 'freshman'
@@ -254,8 +257,7 @@ def recommend(database, document):
             by_code[code].append(dict(offering, eligibility=state))
     tags, by_label, by_course = load_tags()
     interests = {normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)}
-    selected = {by_label[tag] for tag in interests if tag in by_label}
-    custom = interests - by_label.keys()
+    selected = set().union(*(by_label.get(tag, set()) for tag in interests))
     items = []
     for code, sections in by_code.items():
         sections.sort(key=lambda row: (row['eligibility'] == 'needs_review', row['section_code']))
@@ -297,21 +299,20 @@ def recommend(database, document):
         lower_grade = is_major_elective and level is not None and level < grade
         if lower_grade:
             reasons.append('현재 학년보다 낮은 학년의 전공선택')
-        search_name = normalized_name(lead['course_name'] + ' ' + (lead['english_name'] or ''))
-        matched_tags = selected & classify(lead, tags, by_course)
-        custom_matches = sum(tag in search_name for tag in custom)
-        interest = len(matched_tags) + custom_matches
+        course_tags = classify(lead, tags, by_course)
+        matched_tags = selected & course_tags
+        interest = len(matched_tags)
         if matched_tags:
             labels = [tag['label'] for tag in tags if tag['id'] in matched_tags]
             reasons.append('관심 주제 일치 · ' + ', '.join(labels))
-        if custom_matches:
-            reasons.append('과목명과 관심 주제가 일치')
         uncertain = all(row['eligibility'] == 'needs_review' for row in sections)
         grade_rank = 0
         if is_major_elective:
             grade_rank = 3 if lower_grade else 2 if level is None else int(level > grade)
         candidate = dict(course_code=code, course_name=lead['course_name'], group=group, lower_grade=lower_grade,
                          recommended_grade=level, requirement_ids=needed, reasons=reasons,
+                         interest_tags=[tag['id'] for tag in tags if tag['id'] in course_tags]
+                                       or ([OTHER] if OTHER in course_tags else []),
                          eligibility='needs_review' if uncertain else 'no_restriction_recorded',
                          sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits','eligibility')}
                                    for row in sections])

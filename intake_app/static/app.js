@@ -2,8 +2,7 @@
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const days = {MON:'월',TUE:'화',WED:'수',THU:'목',FRI:'금',SAT:'토',SUN:'일'};
-const statuses = {unconfirmed:'이수 여부 미확인',completed:'이수 완료',in_progress:'수강 중',not_completed:'미이수 / 취소 / F'};
-const initial = () => ({kind:'student_input',schema_version:2,student:{department_id:'DEPT_CS',admission_year:null,grade:null,admission_type:'freshman',program_type:null,regular_terms_completed:null,min_credits:null,max_credits:null,interests:[],transfer_recognized_credits:null},history_complete:false,course_attempts:[]});
+const initial = () => ({kind:'student_input',schema_version:2,student:{department_id:'DEPT_CS',admission_year:null,grade:null,admission_type:'freshman',regular_terms_completed:null,min_credits:null,max_credits:null,interests:[],transfer_recognized_credits:null},history_complete:false,course_attempts:[]});
 let state=initial(), version=0, csrf='', step=1, dirty=false, edits=0, saving=false, importPreview=null, importing=false;
 const draftKey = 'course-compass-input-draft';
 const recommendationPage = location.pathname === '/recommendations';
@@ -11,12 +10,12 @@ document.title = (recommendationPage ? '과목 추천' : '수강 정보') + ' ·
 $(recommendationPage ? '#recommend-nav' : '#home-nav').setAttribute('aria-current', 'page');
 if (recommendationPage) $('#recommend-nav').removeAttribute('target');
 let saveTimer, pendingSave, draftConflict = false, loaded = false;
-const fields={'admission-year':'admission_year',grade:'grade',department:'department_id','admission-type':'admission_type','program-type':'program_type','regular-terms':'regular_terms_completed','min-credits':'min_credits','max-credits':'max_credits','transfer-credits':'transfer_recognized_credits'};
+const fields={'admission-year':'admission_year',grade:'grade',department:'department_id','admission-type':'admission_type','regular-terms':'regular_terms_completed','min-credits':'min_credits','max-credits':'max_credits','transfer-credits':'transfer_recognized_credits'};
 const numeric = new Set(['admission_year','grade','min_credits','max_credits','transfer_recognized_credits','regular_terms_completed']);
-const tags=['인공지능','경제·금융','심리','예술·문화','사회·정치','역사','과학기술','철학·윤리','창업','글쓰기'];
+let tags = [], interestAliases = {};
 function message(text,type='info'){$('#message').textContent=text;$('#message').className='message '+type;$('#message').hidden=false;}
 function touch() {
-  clearImportPreview(); clearComparison();
+  clearImportPreview();
   if (!recommendationPage) clearRecommendations();
   dirty = true;
   edits++;
@@ -40,8 +39,14 @@ function forgetDraft(savedDocument) {
   } catch { /* Browser storage is optional. */ }
 }
 async function api(path,payload){const options=payload===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':csrf},body:JSON.stringify(payload)};const response=await fetch(path,options);let data;try{data=await response.json();}catch{throw new Error('서버 응답을 읽을 수 없습니다. 서버 실행 상태를 확인해주세요.');}if(!response.ok)throw Object.assign(new Error(data.error||'요청에 실패했습니다.'),{status:response.status});return data;}
-function fillProfile(){for(const [id,key] of Object.entries(fields))$('#'+id).value=state.student[key]??'';$('#history-complete').checked=state.history_complete;$('#transfer-box').hidden=state.student.admission_type!=='transfer';renderTags();}
-function renderTags(){const all=[...new Set([...tags,...state.student.interests])];$('#tags').innerHTML=all.map(tag=>`<button class="tag ${state.student.interests.includes(tag)?'selected':''}" aria-pressed="${state.student.interests.includes(tag)}" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('');}
+function fillProfile(){for(const [id,key] of Object.entries(fields))$('#'+id).value=state.student[key]??'';$('#transfer-box').hidden=state.student.admission_type!=='transfer';renderTags();}
+function renderTags() {
+  $('#tags').innerHTML = ['전공', '교양'].map(group => `<fieldset class="interest-group">
+    <legend>${group}</legend><div class="tags">${tags.filter(tag => tag.group === group).map(tag => {
+      const selected = state.student.interests.includes(tag.id);
+      return `<button type="button" class="tag${selected ? ' selected' : ''}" aria-pressed="${selected}" data-tag="${esc(tag.id)}">${esc(tag.label)}</button>`;
+    }).join('')}</div></fieldset>`).join('');
+}
 function switchStep(value) {
   step = value;
   for (let i = 1; i <= 3; i++) {
@@ -61,7 +66,6 @@ function switchStep(value) {
 const options=(mapping,current,empty)=>`<option value="">${empty}</option>`+Object.entries(mapping).map(([key,label])=>`<option value="${key}" ${key===current?'selected':''}>${label}</option>`).join('');
 const termPattern = /^(19|20)\d{2}-(1|2|summer|winter)$/;
 const courseSources = {manual:'직접 입력',ai:'이전 입력',sample:'예시 데이터',everytime:'에브리타임'};
-const excludedCourses = new Set();
 let editingCourseId = null;
 
 function canConfirm(course) {
@@ -81,13 +85,9 @@ function updateSelection(checkboxes, master, button, label) {
   $(label).textContent = rows.length ? `${rows.length}건 중 ${selected}건 선택` : '선택할 과목이 없습니다.';
 }
 
-function updateCourseSelection() {
-  updateSelection('[data-course-selection]:enabled', '#select-all-courses', '#confirm-selected', '#course-selection');
-}
-
 function courseDetails(course) {
   const c = course;
-  return `<tr data-id="${esc(c.id)}" class="course-detail-row"${editingCourseId===c.id?'':' hidden'}><td colspan="6">
+  return `<tr data-id="${esc(c.id)}" class="course-detail-row"${editingCourseId===c.id?'':' hidden'}><td colspan="4">
     <div class="course-fields">
       <label>과목명<input data-field="course_name" maxlength="200" value="${esc(c.course_name)}"></label>
       <label>수강 학기<input data-field="term" value="${esc(c.term)}" placeholder="예: 2026-2" list="terms"></label>
@@ -108,26 +108,20 @@ function courseDetails(course) {
 function renderCourses() {
   const courses = state.course_attempts;
   $('#course-count').textContent = courses.length;
-  $('#course-selection-toolbar').hidden = !courses.length;
   if (!courses.length) {
     $('#course-list').innerHTML = '<div class="empty"><strong>등록한 과목이 없습니다</strong>공유 링크로 가져오거나 과목을 직접 추가하세요.</div>';
     return;
   }
   $('#course-list').innerHTML = `<table class="course-table"><thead><tr>
-    <th scope="col"><input id="select-all-courses" type="checkbox" aria-label="미확인 과목 모두 선택"></th>
-    <th scope="col">과목</th><th scope="col">학기</th><th scope="col" class="course-code">강좌코드</th><th scope="col">이수 상태</th><th scope="col">편집</th>
+    <th scope="col">과목</th><th scope="col">학기</th><th scope="col" class="course-code">강좌코드</th><th scope="col">편집</th>
   </tr></thead><tbody>${courses.map(c => {
-    const selectable = !c.user_confirmed && canConfirm(c);
     const name = c.course_name || '과목명 미입력';
     return `<tr class="course-row" data-id="${esc(c.id)}">
-      <td><input type="checkbox" data-course-selection aria-label="${esc(name)} 선택" ${selectable&&!excludedCourses.has(c.id)?'checked':''} ${selectable?'':'disabled'}></td>
       <td><strong data-course-name>${esc(name)}</strong><small data-course-info>${esc([c.professor,courseSources[c.source]].filter(Boolean).join(' · '))}</small></td>
       <td data-course-term>${esc(c.term || '—')}</td><td class="course-code" data-course-code>${esc(c.lecture_code || '—')}</td>
-      <td><select data-field="completion_status" aria-label="${esc(name)} 이수 상태">${Object.entries(statuses).map(([value,label])=>`<option value="${value}" ${value===c.completion_status?'selected':''}>${label}</option>`).join('')}</select></td>
       <td><button class="button subtle course-edit" data-action="edit" aria-expanded="${editingCourseId===c.id}">상세</button></td>
     </tr>${courseDetails(c)}`;
   }).join('')}</tbody></table>`;
-  updateCourseSelection();
 }
 
 function refreshCourseRow(course, row) {
@@ -135,23 +129,18 @@ function refreshCourseRow(course, row) {
   row.querySelector('[data-course-info]').textContent = [course.professor, courseSources[course.source]].filter(Boolean).join(' · ');
   row.querySelector('[data-course-term]').textContent = course.term || '—';
   row.querySelector('[data-course-code]').textContent = course.lecture_code || '—';
-  const status = row.querySelector('[data-field="completion_status"]');
-  status.value = course.completion_status;
-  status.setAttribute('aria-label', (course.course_name || '과목') + ' 이수 상태');
-  const checkbox = row.querySelector('[data-course-selection]');
-  checkbox.setAttribute('aria-label', (course.course_name || '과목') + ' 선택');
-  checkbox.disabled = course.user_confirmed || !canConfirm(course);
-  checkbox.checked = !checkbox.disabled && !excludedCourses.has(course.id);
-  updateCourseSelection();
 }
-function renderSummary(){
- const courses=state.course_attempts, done=courses.filter(c=>c.user_confirmed&&c.completion_status!=='unconfirmed'&&c.course_name&&c.term);
- $('#summary-stats').innerHTML=[['입력한 과목',courses.length],['확인한 과목',done.length],['이수 완료',done.filter(c=>c.completion_status==='completed').length]].map(([label,count])=>`<div class="stat">${label}<strong>${count}<small> 과목</small></strong></div>`).join('');
- const p=state.student;$('#summary-profile').textContent=`컴퓨터공학과 · ${p.admission_year||'입학연도 미입력'} · ${p.grade? p.grade+'학년':'학년 미입력'} · ${p.admission_type==='transfer'?'편입학':'신입학'} / 관심 주제: ${p.interests.join(', ')||'미선택'}`;
- $('#summary-table').innerHTML=`<table><thead><tr><th>과목</th><th>수강 학기</th><th>강좌코드</th><th>이수 상태</th><th>확인</th></tr></thead><tbody>${courses.map(c=>`<tr><td>${esc(c.course_name)||'미입력'}${c.source==='sample'?'<small>예시 데이터</small>':''}</td><td>${esc(c.term)||'미확인'}</td><td>${esc(c.lecture_code)||'미입력'}</td><td>${statuses[c.completion_status]}</td><td>${c.user_confirmed?'확인함':'확인 필요'}</td></tr>`).join('')}</tbody></table>`;
- const warnings=[];if(!state.history_complete)warnings.push('일부 수강 내역만 입력한 상태입니다.');if(done.length<courses.length)warnings.push(`${courses.length-done.length}개 과목의 이름·학기·이수 상태를 검토해주세요.`);if(courses.some(c=>c.source==='sample'))warnings.push('예시 과목이 포함되어 있습니다. 본인의 이수 내역인지 확인해주세요.');
- $('#review-warnings').innerHTML=warnings.map(w=>`<p class="notice">${esc(w)}</p>`).join('');
+
+function renderSummary() {
+  const courses = state.course_attempts;
+  const student = state.student;
+  const interests = tags.filter(tag => student.interests.includes(tag.id)).map(tag => tag.label);
+  $('#summary-profile').textContent = `컴퓨터공학과 · ${student.admission_year}학번 · ${student.grade}학년 · 과목 ${courses.length}건${interests.length ? ' · ' + interests.join(', ') : ''}`;
+  $('#summary-table').innerHTML = courses.length ? `<table><thead><tr><th>과목</th><th>수강 학기</th><th>강좌코드</th></tr></thead>
+    <tbody>${courses.map(row => `<tr><td>${esc(row.course_name || '미입력')}</td><td>${esc(row.term || '미입력')}</td>
+      <td>${esc(row.lecture_code || '—')}</td></tr>`).join('')}</tbody></table>` : '';
 }
+
 async function save(reviewed = false) {
   clearTimeout(saveTimer);
   while (pendingSave) await pendingSave;
@@ -188,6 +177,7 @@ async function save(reviewed = false) {
   return true;
 }
 function addManual() {
+  state.history_complete = false;
   editingCourseId = crypto.randomUUID();
   state.course_attempts.push({
     id: editingCourseId,
@@ -195,7 +185,7 @@ function addManual() {
     professor: null,
     source_ref: null,
     course_name: '',
-    term: $('#bulk-term').value.trim() || null,
+    term: null,
     meetings: [{day: null, start_time: null, end_time: null, locations: []}],
     completion_status: 'unconfirmed',
     user_confirmed: false,
@@ -208,50 +198,49 @@ function addManual() {
   renderCourses();
   $('#course-list .course-detail-row:not([hidden]) [data-field="course_name"]').focus();
 }
-function mergeCourses(){const grouped=new Map(),merged=[];let count=0;for(const c of state.course_attempts){const key=c.source!=='everytime'&&!c.lecture_code&&c.term&&c.course_name.trim()?c.term+'|'+c.course_name.replace(/\s+/g,'').toLowerCase():c.id;if(!grouped.has(key)){grouped.set(key,c);merged.push(c);continue;}const first=grouped.get(key);first.meetings??=[];for(const m of c.meetings??[])if(!first.meetings.some(existing=>JSON.stringify(existing)===JSON.stringify(m)))first.meetings.push(m);first.extraction_ids=[...new Set([...(first.extraction_ids??[]),...(c.extraction_ids??[])])];first.extraction_warnings=[...new Set([...(first.extraction_warnings??[]),...(c.extraction_warnings??[]),'사용자가 동명 과목을 묶었습니다. 같은 과목인지 다시 확인해주세요.'])];first.course_name_raw=[...new Set([first.course_name_raw,c.course_name_raw])].filter(Boolean).join(' / ');first.review_notes=[first.review_notes,c.review_notes].filter(Boolean).join('\n');first.completion_status='unconfirmed';if(c.source==='sample')first.source='sample';first.user_confirmed=false;count++;}state.course_attempts=merged;if(count)touch();renderCourses();message(count?`${count}개 중복 항목을 묶었습니다. 수업 시간과 이수 상태를 다시 확인해주세요.`:'묶을 동명 과목이 없습니다. 학기가 같은 항목만 묶습니다.');}
-for(const [id,key] of Object.entries(fields))$('#'+id).addEventListener('input',event=>{let value=event.target.value;state.student[key]=numeric.has(key)?(value===''?null:Number(value)):value;if(key==='program_type'&&!value)state.student[key]=null;if(key==='admission_type')$('#transfer-box').hidden=value!=='transfer';touch();});
-$('#tags').addEventListener('click',event=>{const tag=event.target.closest('[data-tag]')?.dataset.tag;if(!tag)return;if(state.student.interests.includes(tag))state.student.interests=state.student.interests.filter(t=>t!==tag);else if(state.student.interests.length<20)state.student.interests.push(tag);else return message('관심 태그는 최대 20개입니다.','error');touch();renderTags();});
-$('#add-tag').addEventListener('click',()=>{const tag=$('#custom-tag').value.trim();if(!tag)return;if(!state.student.interests.includes(tag)){if(state.student.interests.length>=20)return message('관심 태그는 최대 20개입니다.','error');state.student.interests.push(tag);touch();}$('#custom-tag').value='';renderTags();});
-$('#custom-tag').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('#add-tag').click();}});
-function setCourseSelected(checkbox, selected) {
-  checkbox.checked = selected;
-  const id = checkbox.closest('[data-id]').dataset.id;
-  if (selected) excludedCourses.delete(id);
-  else excludedCourses.add(id);
+for (const [id, key] of Object.entries(fields)) {
+  const input = $('#' + id);
+  input.addEventListener('input', () => {
+    const value = input.value;
+    if ((key === 'min_credits' || key === 'max_credits') && input.validity.stepMismatch) {
+      input.setCustomValidity('희망학점은 정수로 입력해주세요.');
+      input.reportValidity();
+    } else {
+      input.setCustomValidity('');
+    }
+    state.student[key] = numeric.has(key) ? (value === '' ? null : Number(value)) : value;
+    if (key === 'admission_type') $('#transfer-box').hidden = value !== 'transfer';
+    touch();
+  });
 }
-
+$('#tags').addEventListener('click', event => {
+  const button = event.target.closest('[data-tag]');
+  if (!button) return;
+  const tag = button.dataset.tag;
+  const selected = !state.student.interests.includes(tag);
+  state.student.interests = selected ? [...state.student.interests, tag] : state.student.interests.filter(id => id !== tag);
+  button.classList.toggle('selected', selected);
+  button.setAttribute('aria-pressed', String(selected));
+  touch();
+});
 $('#course-list').addEventListener('input', event => {
   const input = event.target;
-  if (input.id === 'select-all-courses') {
-    for (const checkbox of document.querySelectorAll('[data-course-selection]:enabled')) {
-      setCourseSelected(checkbox, input.checked);
-    }
-    updateCourseSelection();
-    return;
-  }
   const row = input.closest('[data-id]');
   if (!row) return;
   const course = state.course_attempts.find(item => item.id === row.dataset.id);
-  if (input.hasAttribute('data-course-selection')) {
-    setCourseSelected(input, input.checked);
-    updateCourseSelection();
-    return;
-  }
   const field = input.dataset.field;
   const meetingField = input.dataset.meetingField;
-  if (field === 'completion_status') {
-    if (input.value !== 'unconfirmed' && !canConfirm(course)) {
-      input.value = course.completion_status;
-      return message('과목명과 올바른 수강 학기를 먼저 입력해주세요.', 'error');
-    }
-    course.completion_status = input.value;
-    course.user_confirmed = input.value !== 'unconfirmed';
-    excludedCourses.delete(course.id);
-  } else if (field) {
+  if (field) {
     course[field] = ['term','lecture_code','professor'].includes(field) ? input.value || null : input.value;
     if (field !== 'review_notes') {
-      course.user_confirmed = false;
-      course.completion_status = 'unconfirmed';
+      if (!canConfirm(course)) {
+        course.user_confirmed = false;
+        course.completion_status = 'unconfirmed';
+      } else if (course.source === 'manual' && !course.user_confirmed) {
+        course.user_confirmed = true;
+        course.completion_status = 'completed';
+      }
+      state.history_complete = false;
     }
   } else if (meetingField) {
     const meeting = course.meetings[Number(input.closest('[data-meeting]').dataset.meeting)];
@@ -280,7 +269,7 @@ $('#course-list').addEventListener('click', event => {
   }
   if (action === 'delete') {
     state.course_attempts = state.course_attempts.filter(row => row.id !== course.id);
-    excludedCourses.delete(course.id);
+    state.history_complete = false;
     if (editingCourseId === course.id) editingCourseId = null;
   }
   if (action === 'add-meeting') (course.meetings ??= []).push({day:null,start_time:null,end_time:null,locations:[]});
@@ -289,27 +278,7 @@ $('#course-list').addEventListener('click', event => {
   renderCourses();
 });
 
-$('#confirm-selected').addEventListener('click', () => {
-  const selected = new Set([...document.querySelectorAll('[data-course-selection]:checked:enabled')]
-    .map(input => input.closest('[data-id]').dataset.id));
-  if (!selected.size) return;
-  for (const course of state.course_attempts) {
-    if (!selected.has(course.id)) continue;
-    course.completion_status = 'completed';
-    course.user_confirmed = true;
-  }
-  touch();
-  renderCourses();
-  message(`선택한 ${selected.size}건을 이수 완료로 표시했습니다.`, 'success');
-});
 $('#add-course').addEventListener('click', addManual);
-$('#merge').addEventListener('click', mergeCourses);
-$('#apply-term').addEventListener('click',()=>{const value=$('#bulk-term').value.trim();if(!termPattern.test(value))return message('학기 형식을 확인해주세요. 예: 2026-2','error');let count=0;for(const c of state.course_attempts)if(!c.term){c.term=value;c.user_confirmed=false;count++;}if(count)touch();renderCourses();message(`${count}개 과목에 학기를 적용했습니다.`);});
-$('#history-complete').addEventListener('change', event => {
-  state.history_complete = event.target.checked;
-  touch();
-  renderSummary();
-});
 function openProfile() {
   const dialog = $('#profile-dialog');
   if (!dialog.open) dialog.showModal();
@@ -331,8 +300,8 @@ $('#profile-dialog').addEventListener('cancel', event => {
 $('#back').addEventListener('click', () => switchStep(step - 1));
 $('#next').addEventListener('click', async () => {
   if (!loaded || importing) return;
-  if (step === 1 && (!state.student.admission_year || !state.student.grade || !state.student.program_type)) {
-    return message('입학연도, 현재 학년, 이수 과정을 입력해주세요.', 'error');
+  if (step === 1 && (!state.student.admission_year || !state.student.grade)) {
+    return message('입학연도와 현재 학년을 입력해주세요.', 'error');
   }
   const next = $('#next');
   next.disabled = true;
@@ -365,13 +334,16 @@ $('#delete-all').addEventListener('click', async () => {
   state.course_attempts = [];
   state.history_complete = false;
   editingCourseId = null;
-  excludedCourses.clear();
   touch();
   renderCourses();
 });
-$('#export').addEventListener('click',()=>{const payload={...state,course_attempts:state.course_attempts.map(({meetings,course_name_raw,extraction_ids,extraction_warnings,...row})=>({...row,completion_status:row.user_confirmed?row.completion_status:'unconfirmed'}))};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='student-input.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 function useDocument(document) {
   state = document || initial();
+  for (const key of ['min_credits', 'max_credits']) {
+    if (state.student[key] != null) state.student[key] = Math.round(state.student[key]);
+  }
+  state.student.interests = [...new Set(state.student.interests.flatMap(value =>
+    interestAliases[value.normalize('NFKC').toLowerCase().replace(/\s/g, '')] || []))];
   delete state.student.target_term;
   delete state.student.recognition_notes;
 }
@@ -380,6 +352,8 @@ async function init() {
   try {
     const config = await api('/api/config');
     csrf = config.csrf_token;
+    tags = config.interest_tags;
+    interestAliases = config.interest_aliases;
     const saved = await api('/api/input');
     version = saved.version;
     useDocument(saved.document);
@@ -410,12 +384,8 @@ async function init() {
 function clearImportPreview() {
   importPreview = null;
   $('#import-preview').hidden = true;
+  $('#import-summary').hidden = true;
   $('#import-table').replaceChildren();
-}
-
-function clearComparison() {
-  $('#comparison-summary').textContent = '';
-  $('#comparison-table').replaceChildren();
 }
 
 function clearRecommendations() {
@@ -426,13 +396,15 @@ function clearRecommendations() {
 
 function renderImportPreview(preview) {
   const failures = preview.summary.failed_or_skipped_tables;
-  const missing = preview.issues.filter(issue => issue.code === 'missing_matching_fields').length;
+  const excluded = preview.official_excluded_count || 0;
   $('#import-summary').textContent = [
-    `과목 ${preview.course_attempts.length}건`,
+    `공식 분반 일치 ${preview.course_attempts.length}건`,
     failures ? `조회하지 못한 시간표 ${failures}개` : '',
-    missing ? `강좌코드 또는 과목명 확인 필요 ${missing}건` : '',
+    excluded ? `공식 분반과 대조되지 않은 ${excluded}건 제외` : '',
     state.course_attempts.length ? `기존 수강내역 ${state.course_attempts.length}건 교체` : '',
   ].filter(Boolean).join(' · ');
+  $('#import-summary').hidden = false;
+  if (!preview.course_attempts.length) return;
   $('#import-table').innerHTML = `<table><thead><tr><th><input id="select-all-imports" type="checkbox" aria-label="가져올 과목 모두 선택"></th><th>과목</th><th>학기</th><th>강좌코드</th></tr></thead><tbody>
     ${preview.course_attempts.map(row => `<tr><td><input type="checkbox" value="${esc(row.id)}" data-import-action aria-label="${esc(row.course_name || '이름 미입력 과목')}" checked></td>
       <td>${esc(row.course_name || '이름 미입력')}${row.professor ? `<small>${esc(row.professor)}</small>` : ''}</td>
@@ -445,6 +417,8 @@ function renderImportPreview(preview) {
 function updateImportSelection() {
   updateSelection('[data-import-action]', '#select-all-imports', '#apply-import', '#import-selection');
 }
+
+$('#discard-import').addEventListener('click', () => { clearImportPreview(); $('#shared-url').focus(); });
 
 $('#import-table').addEventListener('input', event => {
   if (event.target.id === 'select-all-imports') {
@@ -461,10 +435,10 @@ $('#import-form').addEventListener('submit', async event => {
   clearImportPreview();
   $('#preview-import').disabled = true;
   $('#import-progress').hidden = false;
-  $('#import-progress').textContent = '공개 시간표를 확인하는 중입니다.';
+  $('#import-progress').textContent = '공유 시간표를 불러와 공식 강좌와 대조하는 중입니다.';
   const start = edits;
   try {
-    const result = await api('/api/import/preview', {version, shared_url: $('#shared-url').value.trim()});
+    const result = await api('/api/import/preview', {version, shared_url: $('#shared-url').value.trim(), official_only:true});
     if (start !== edits || result.base_revision !== version) {
       return message('입력이 변경됐습니다. 저장 후 공유 링크를 다시 가져와주세요.', 'error');
     }
@@ -501,15 +475,13 @@ $('#apply-import').addEventListener('click', async () => {
     useDocument(result.document);
     dirty = false;
     editingCourseId = null;
-    excludedCourses.clear();
     fillProfile();
     $('#save-state').textContent = '가져온 과목을 저장했어요';
     clearImportPreview();
-    clearComparison();
     clearRecommendations();
     renderCourses();
     if (step === 3) renderSummary();
-    message(`선택한 ${selected.length}건으로 수강내역을 교체했습니다. 이수 상태를 확인해주세요.`, 'success');
+    message(`선택한 ${selected.length}건으로 수강내역을 교체했습니다.`, 'success');
   } catch (error) {
     message(error.message, 'error');
   } finally {
@@ -518,47 +490,6 @@ $('#apply-import').addEventListener('click', async () => {
     $('#close-profile').disabled = false;
     updateImportSelection();
     $('#preview-import').disabled = false;
-  }
-});
-
-const comparisonReasons = {
-  completion_not_confirmed:'확인된 이수 완료 과목만 대조합니다.',
-  term_unavailable:'이 학기의 공식 자료가 없습니다.',
-  missing_lecture_code:'강좌코드가 없습니다.',
-  unsupported_lecture_code:'지원하는 강좌코드 형식과 다릅니다.',
-  offering_not_in_snapshot:'현재 수집 범위에서 분반을 찾지 못했습니다.',
-  multiple_offerings:'후보가 여러 개입니다.',
-  course_name_conflict:'공식 과목명과 다릅니다.',
-  professor_conflict:'공식 교수명과 다릅니다.',
-};
-
-$('#compare-offerings').addEventListener('click', async () => {
-  if (!await save() || !version) return message('이수 상태를 확인하고 입력을 저장해주세요.', 'error');
-  const button = $('#compare-offerings');
-  button.disabled = true;
-  clearComparison();
-  const start = edits;
-  try {
-    const result = await api('/api/offerings/compare', {version});
-    if (edits !== start || result.input_revision !== version || dirty) return;
-    const matches = result.matches.filter(item => item.status !== 'not_checked');
-    const linked = matches.filter(item => item.status === 'offering_matched').length;
-    $('#comparison-summary').textContent = matches.length
-      ? `분반 연결 ${linked}건 · 확인 필요 ${matches.length-linked}건`
-      : '이수 완료로 확인한 과목이 없습니다.';
-    const attempts = new Map(state.course_attempts.map(row => [row.id, row]));
-    $('#comparison-table').innerHTML = matches.length ? `<table><thead><tr><th>입력 과목</th><th>학기</th><th>공식 분반</th><th>개설 학점</th><th>결과</th></tr></thead><tbody>
-      ${matches.map(item => {
-        const row = attempts.get(item.course_attempt_id);
-        const candidates = item.offering ? [item.offering] : item.candidates;
-        const details = candidates.map(o => `${esc(o.course_code)}-${esc(o.section_code)} · ${esc(o.course_name)}${o.professor ? ` · ${esc(o.professor)}` : ''}`).join('<br>');
-        return `<tr><td>${esc(row.course_name)}</td><td>${esc(row.term)}</td><td>${details||'—'}</td>
-          <td>${esc(item.offering?.credits ?? '—')}</td><td>${item.offering ? '분반 연결' : esc(comparisonReasons[item.reason])}</td></tr>`;
-      }).join('')}</tbody></table>` : '';
-  } catch (error) {
-    message(error.message, 'error');
-  } finally {
-    button.disabled = false;
   }
 });
 
@@ -630,10 +561,11 @@ function renderRecommendations(result) {
       content = '<p>남은 요건이 없습니다.</p>';
     }
     const count = group.endsWith('_credits') ? `후보 ${entries.length}개` : `남은 요건 ${required.length}개`;
-    const priority = group === 'current_major_required' || group === 'required_general';
+    const priority = rows.length > 0 && required.length > 0 &&
+      (group === 'current_major_required' || group === 'required_general');
     const open = group === 'current_major_required' && required.length > 0;
     return `<details class="result-panel${priority ? ' result-panel--priority' : ''}"${open ? ' open' : ''}>
-      <summary>${title}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
+      <summary>${title}${priority ? '<span class="priority-label">우선 확인</span>' : ''}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
   });
   const creditReviews = result.credit_reviews.length
     ? `<p class="notice">택1 과목을 모두 이수해 인정학점 확인이 필요합니다. 아래 과목의 학점은 확인 전까지 합계에서 보류했습니다.</p>
