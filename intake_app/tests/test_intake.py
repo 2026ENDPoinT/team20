@@ -6,7 +6,9 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
+from intake_app.advisor import AdvisorError, GeminiAdvisor
 from intake_app.domain import ValidationError, validate_document, document_warnings
 from intake_app.recommendations import recommend
 from intake_app.schedules import generate
@@ -138,6 +140,61 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(required['outcome'], 'no_feasible_plan')
         self.assertIn('100453', required['issues'][0])
         self.assertIn('수강 대상에서 제외', required['issues'][0])
+
+    def test_graduation_projection_keeps_unconfirmed_sections_conditional(self):
+        document = profile()
+        document['history_complete'] = True
+        document['student']['grade'] = 3
+        document = validate_document(document)
+        before = copy.deepcopy(document)
+        db = BASE.parent / 'db' / 'courses.sqlite3'
+        offering = '20262:101068:11002:00500001'
+        result = generate(db, document, dict(min_credits=2, max_credits=2, locked_offering_ids=[offering]))
+        self.assertEqual(result['outcome'], 'provisional')
+        baseline = {row['id']: row for row in result['graduation_requirements']}
+        self.assertEqual(baseline['total']['current'], 0)
+        projected = result['candidates'][0]['graduation_projection']
+        self.assertEqual(projected['total']['after'], {'current': 0, 'status': 'not_met'})
+        self.assertEqual(projected['total']['conditional'], {'current': 2, 'status': 'not_met'})
+        self.assertEqual(projected['total']['offering_ids'], [offering])
+        self.assertNotIn('regular_terms', projected)
+        self.assertEqual(document, before)
+
+    def test_advisor_passes_followup_context_and_does_not_act_on_invalid_intent(self):
+        import io
+
+        previous = dict(action='compare', target=None, days_off=[], priorities=['required'],
+                        min_credits=None, max_credits=None)
+        expected = dict(previous, days_off=['금'])
+        question = '그럼 금요일은 꼭 비워줘.'
+        response = {'candidates': [{'finishReason': 'STOP', 'content': {'parts': [
+            {'text': json.dumps(dict(expected, reply='금요일을 비우고 전필도 살펴볼게.'))},
+        ]}}]}
+        with patch.dict('os.environ', {'GEMINI_API_KEY': 'test-key'}):
+            advisor = GeminiAdvisor()
+        with patch('intake_app.advisor.urlopen', return_value=io.BytesIO(json.dumps(response).encode())) as send:
+            self.assertEqual(advisor.ask(question, previous, 'graduation')['intent'], expected)
+            with self.assertRaisesRegex(AdvisorError, '개인 정보'):
+                advisor.ask('메일 student@example.com으로 보내줘', None)
+        send.assert_called_once()
+        request = send.call_args.args[0]
+        self.assertIn('/gemini-3.1-flash-lite:generateContent', request.full_url)
+        payload = json.loads(request.data)
+        context = json.loads(payload['contents'][0]['parts'][0]['text'])
+        self.assertEqual(context, {'question': question, 'previous_intent': previous, 'previous_topic': 'graduation'})
+        for invalid in [dict(days_off=['없는 요일']), dict(target=2), dict(action='show', target=True),
+                        dict(action='show', target=-2), dict(action='difference')]:
+            response['candidates'][0]['content']['parts'][0]['text'] = json.dumps(
+                dict(expected, reply='다시 살펴볼게.', **invalid))
+            with patch('intake_app.advisor.urlopen', return_value=io.BytesIO(json.dumps(response).encode())):
+                self.assertEqual(advisor.ask(question, previous)['intent']['action'], 'clarify')
+        response['candidates'][0]['content']['parts'][0]['text'] = json.dumps(
+            dict(expected, action='chat', target=0, reply='천만에!'))
+        with patch('intake_app.advisor.urlopen', return_value=io.BytesIO(json.dumps(response).encode())):
+            self.assertEqual(advisor.ask('고마워', previous, 'graduation'), {
+                'intent': dict(action='chat', target=None, days_off=[], priorities=[], min_credits=None, max_credits=None),
+                'reply': '천만에!',
+            })
 
     def test_major_elective_alternatives_use_target_year_and_confirmed_history(self):
         document = profile()
