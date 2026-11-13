@@ -534,6 +534,7 @@ function recommendationSelectionGroups(result) {
 async function loadScheduleRecommendations() {
   const request = ++scheduleRecommendationRequest;
   closeScheduleSections(false);
+  clearScheduleSearch();
   const panel = $('#schedule-recommendations');
   if (!version) {
     panel.innerHTML = '<button type="button" class="button secondary" data-schedule-profile>학생 정보 입력</button>';
@@ -661,17 +662,57 @@ let previewSection = null;
 let pinnedPreview = null;
 let fixedPreviewOfferings = [];
 
+const scheduleConditionsTab = $('#schedule-conditions-tab');
+const scheduleBasketTab = $('#schedule-basket-tab');
+const scheduleTabs = [scheduleConditionsTab, scheduleBasketTab];
+
+function selectScheduleTab(selectedTab) {
+  if (selectedTab === scheduleConditionsTab) closeScheduleSections(false);
+  for (const tab of scheduleTabs) {
+    const selected = tab === selectedTab;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected;
+  }
+}
+
+for (const tab of scheduleTabs) {
+  tab.addEventListener('click', () => selectScheduleTab(tab));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'Home') next = scheduleConditionsTab;
+    else if (event.key === 'End') next = scheduleBasketTab;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      next = tab === scheduleConditionsTab ? scheduleBasketTab : scheduleConditionsTab;
+    } else return;
+    event.preventDefault();
+    selectScheduleTab(next);
+    next.focus();
+  });
+}
+
 async function openScheduleSections(code, trigger) {
-  const request = ++sectionPreviewRevision;
+  selectScheduleTab(scheduleBasketTab);
+  closeScheduleSections(false);
+  const request = sectionPreviewRevision;
+  const inline = trigger.hasAttribute('data-basket-sections');
+  const picker = $('#schedule-section-picker');
+  sectionPickerTrigger = trigger;
+  if (inline) {
+    trigger.closest('.basket-row').after($('#schedule-section-area'));
+    trigger.setAttribute('aria-expanded', 'true');
+  }
+  picker.setAttribute('role', inline ? 'region' : 'dialog');
   const message = $('#schedule-section-error');
-  message.hidden = true;
+  message.textContent = '분반을 불러오는 중이에요.';
+  message.hidden = false;
   trigger.setAttribute('aria-busy', 'true');
   try {
     const courses = await loadBasketSections([{code}]);
-    if (request !== sectionPreviewRevision || !trigger.isConnected || $('#schedule-form').hidden) return;
+    if (request !== sectionPreviewRevision || $('#schedule-form').hidden) return;
     const course = courses[code];
     if (!course) throw new Error('이번 학기에 선택할 수 있는 분반이 없어요.');
-    sectionPickerTrigger = trigger;
+    message.hidden = true;
     sectionCourse = course;
     previewSection = pinnedPreview = null;
     $('#schedule-section-title').textContent = course.course_name;
@@ -682,12 +723,12 @@ async function openScheduleSections(code, trigger) {
       <div class="schedule-rec-actions"><button type="button" class="button secondary" data-pin-preview>미리보기</button>
       <button type="button" class="button secondary" data-add-section="${esc(section.offering_id)}">고정</button></div>
     </article>`).join('');
-    $('#schedule-recommendations').inert = true;
-    $('#schedule-section-picker').hidden = false;
+    $('#schedule-recommendations').inert = !inline;
+    picker.hidden = false;
     $('#schedule-section-list').scrollTop = 0;
     updateSectionButtons(readBasket());
     renderSelectedCalendar();
-    $('#close-schedule-sections').focus();
+    if (!inline) $('#close-schedule-sections').focus();
   } catch (error) {
     if (request === sectionPreviewRevision) {
       message.textContent = error.status === 404
@@ -696,26 +737,24 @@ async function openScheduleSections(code, trigger) {
     }
   } finally {
     trigger.removeAttribute('aria-busy');
+    if (request === sectionPreviewRevision) sectionPickerTrigger?.removeAttribute('aria-busy');
   }
 }
 
 function closeScheduleSections(restoreFocus = true) {
   ++sectionPreviewRevision;
   $('#schedule-section-error').hidden = true;
-  if ($('#schedule-section-picker').hidden) return;
+  if (!sectionPickerTrigger) return;
+  const trigger = sectionPickerTrigger;
+  if (trigger.hasAttribute('data-basket-sections')) {
+    trigger.setAttribute('aria-expanded', 'false');
+    $('#schedule-recommendation-pane').append($('#schedule-section-area'));
+  }
   $('#schedule-section-picker').hidden = true;
   $('#schedule-recommendations').inert = false;
   $('#return-to-schedule-sections').hidden = true;
   sectionCourse = previewSection = pinnedPreview = null;
-  if (restoreFocus) {
-    const trigger = sectionPickerTrigger;
-    const code = trigger?.dataset.basketSections;
-    if (trigger?.isConnected) trigger.focus();
-    else if (code) {
-      [...document.querySelectorAll('[data-basket-sections]')]
-        .find(button => button.dataset.basketSections === code)?.focus();
-    }
-  }
+  if (restoreFocus && trigger.isConnected) trigger.focus();
   sectionPickerTrigger = null;
   renderSelectedCalendar();
 }
@@ -827,6 +866,12 @@ $('#run-recommendations').addEventListener('click', async () => {
 });
 
 const basketKey = 'course-compass-basket';
+const basketList = $('#basket-list');
+if (schedulePage) {
+  $('#schedule-basket-content').append(basketList);
+  $('#open-basket').removeAttribute('aria-haspopup');
+  $('#open-basket').setAttribute('aria-controls', 'schedule-basket');
+}
 const scheduleDays = [...'월화수목금토일'];
 let basketSectionRequest;
 let basketPreviewRevision = 0;
@@ -856,18 +901,36 @@ function renderBasket() {
   const label = row => row.sectionCode ? `${row.code} · ${row.sectionCode} 분반 고정` : row.code;
   $('#basket-count').textContent = rows.length;
   $('#schedule-basket-count').textContent = rows.length;
-  $('#basket-list').innerHTML = rows.length
-    ? rows.map(row => `<div class="basket-row"><span><strong>${esc(row.name)}</strong><small>${esc(label(row))}</small></span><div class="basket-actions">${row.offeringId ? `<button type="button" class="button secondary" data-basket-unlock="${esc(row.code)}">고정 해제</button>` : ''}<button type="button" class="button secondary" data-basket-remove="${esc(row.code)}" aria-label="${esc(row.name)} 바구니에서 삭제">삭제</button></div></div>`).join('')
-    : '<p>추천 과목 옆의 + 버튼으로 과목을 담으세요.</p>';
+  const expandedCode = sectionPickerTrigger?.dataset.basketSections;
+  const sectionArea = $('#schedule-section-area');
+  const active = document.activeElement;
+  if (expandedCode) $('#schedule-recommendation-pane').append(sectionArea);
+  basketList.innerHTML = rows.length
+    ? rows.map(row => `<div class="basket-row">
+        <span><strong>${esc(row.name)}</strong><small>${esc(label(row))}</small></span>
+        <div class="basket-actions">
+          ${schedulePage ? `<button type="button" class="button secondary" data-basket-sections="${esc(row.code)}" aria-expanded="false" aria-controls="schedule-section-area">${row.offeringId ? '분반 변경' : '분반 보기'}</button>` : ''}
+          ${row.offeringId ? `<button type="button" class="button secondary" data-basket-unlock="${esc(row.code)}">고정 해제</button>` : ''}
+          ${schedulePage && !row.offeringId ? `<select data-schedule-course="${esc(row.code)}" aria-label="${esc(row.name)} 편성 조건">
+            <option value="">미지정</option><option value="required">필수 포함</option><option value="preferred">선호</option>
+          </select>` : ''}
+          <button type="button" class="button secondary" data-basket-remove="${esc(row.code)}" aria-label="${esc(row.name)} 바구니에서 삭제">삭제</button>
+        </div>
+      </div>`).join('')
+    : '<p>추천 과목에서 과목을 선택해 바구니에 담으세요.</p>';
   if (schedulePage) {
-    $('#schedule-basket-list').innerHTML = rows.length
-    ? rows.map(row => `<div class="basket-row"><span><strong>${esc(row.name)}</strong><small>${esc(row.sectionCode ? `${row.sectionCode} 분반 고정` : '자동 배정')}</small></span>
-        <div class="basket-actions"><button type="button" class="button secondary" data-basket-sections="${esc(row.code)}" aria-haspopup="dialog">${row.offeringId ? '분반 변경' : '분반 선택'}</button>
-        ${row.offeringId ? `<button type="button" class="button secondary" data-basket-unlock="${esc(row.code)}">고정 해제</button>` : `<select data-schedule-course="${esc(row.code)}" aria-label="${esc(row.name)} 편성 조건">
-          <option value="">미지정</option><option value="required">필수 포함</option><option value="preferred">선호</option>
-        </select>`}<button type="button" class="button secondary" data-basket-remove="${esc(row.code)}" aria-label="${esc(row.name)} 선택 해제">해제</button></div></div>`).join('')
-      : '<p class="field-hint">선택 과목 없음</p>';
-    for (const select of document.querySelectorAll('[data-schedule-course]')) {
+    if (expandedCode) {
+      const trigger = [...basketList.querySelectorAll('[data-basket-sections]')]
+        .find(button => button.dataset.basketSections === expandedCode);
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'true');
+        if (sectionPickerTrigger.hasAttribute('aria-busy')) trigger.setAttribute('aria-busy', 'true');
+        sectionPickerTrigger = trigger;
+        trigger.closest('.basket-row').after(sectionArea);
+        if (sectionArea.contains(active)) active.focus({preventScroll:true});
+      } else closeScheduleSections(false);
+    }
+    for (const select of $('#basket-list').querySelectorAll('[data-schedule-course]')) {
       const row = rows.find(row => row.code === select.dataset.scheduleCourse);
       select.value = row.scheduleMode ?? '';
     }
@@ -880,21 +943,29 @@ function renderBasket() {
     button.disabled = added;
     button.setAttribute('aria-label', button.dataset.courseName + (scheduleButton ? (added ? ' 선택됨' : ' 선택') : (added ? ' 담김' : ' 바구니에 담기')));
   }
+  for (const button of $('#schedule-search-results').querySelectorAll('[data-search-add]')) {
+    button.disabled = codes.has(button.dataset.searchAdd);
+    button.textContent = button.disabled ? '담김' : '담기';
+  }
   if ($('#section-dialog').open || !$('#schedule-section-picker').hidden) updateSectionButtons(rows);
 }
 
 $('#open-basket').addEventListener('click', () => {
+  if (schedulePage) {
+    if ($('#schedule-form').hidden) showScheduleConditions();
+    selectScheduleTab(scheduleBasketTab);
+    $('#schedule-basket-title').focus();
+    return;
+  }
   renderBasket();
   $('#basket-dialog').showModal();
 });
 function removeSelection(event) {
   const button = event.target.closest('[data-basket-remove]');
   if (!button) return;
-  clearManualLock(button.dataset.basketRemove);
   writeBasket(readBasket().filter(row => row.code !== button.dataset.basketRemove));
 }
 $('#basket-list').addEventListener('click', removeSelection);
-$('#schedule-basket-list').addEventListener('click', removeSelection);
 
 async function saveSelection(entry) {
   let rows = readBasket();
@@ -910,15 +981,92 @@ async function saveSelection(entry) {
       rows = readBasket().filter(row => !replaced.has(row.code));
       if (rows.some(row => row.code !== entry.code &&
         (scheduleSelectionGroups[row.code] || []).some(group => groups.includes(group)))) return false;
-      for (const code of replaced) clearManualLock(code);
     }
-    if (entry.offeringId) clearManualLock(entry.code);
   }
   const index = rows.findIndex(row => row.code === entry.code);
   if (index === -1) rows.push(entry);
   else rows[index] = entry;
   return writeBasket(rows);
 }
+
+const scheduleCourseQuery = $('#schedule-course-query');
+const scheduleSearchStatus = $('#schedule-search-status');
+const scheduleSearchResults = $('#schedule-search-results');
+let scheduleSearchRevision = 0;
+
+function clearScheduleSearch() {
+  ++scheduleSearchRevision;
+  scheduleSearchStatus.textContent = '';
+  scheduleSearchResults.replaceChildren();
+}
+
+async function fetchScheduleCourseResults(version, query) {
+  try {
+    return await api('/api/schedules/search', {version, query});
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    // An older running server can still supply the courses it recommends.
+    const {target_term, candidates} = await api('/api/recommendations', {version, automatic_term:true});
+    const normalize = value => value.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+    const key = normalize(query);
+    const courses = candidates.flatMap(({course_code, course_name, sections}) => {
+      if (!course_code.startsWith(key) && !normalize(course_name).includes(key)) return [];
+      const section = sections.find(row => row.credits > 0 && row.schedule);
+      return section ? [{course_code, course_name, credits:section.credits}] : [];
+    });
+    return {target_term, total:courses.length, courses:courses.slice(0, 20)};
+  }
+}
+
+async function searchScheduleCourses() {
+  clearScheduleSearch();
+  const query = scheduleCourseQuery.value.trim();
+  if (!query) {
+    scheduleSearchStatus.textContent = '코드나 과목명을 입력하세요.';
+    scheduleCourseQuery.focus();
+    return;
+  }
+  const revision = scheduleSearchRevision;
+  scheduleSearchStatus.textContent = '검색 중…';
+  try {
+    if (!await save()) throw new Error('학생 정보를 저장해주세요.');
+    const latest = await api('/api/input');
+    if (revision !== scheduleSearchRevision) return;
+    const result = await fetchScheduleCourseResults(latest.version, query);
+    if (revision !== scheduleSearchRevision) return;
+    const codes = new Set(readBasket().map(row => row.code));
+    scheduleSearchStatus.textContent = result.total
+      ? `${result.target_term} · ${result.total}과목${result.total > result.courses.length ? ' (상위 20개 표시)' : ''}`
+      : `${result.target_term} · 검색 결과 없음`;
+    scheduleSearchResults.innerHTML = result.courses.map(course => {
+      const {course_code:code, course_name:name, credits} = course;
+      const added = codes.has(code);
+      return `<li><span><strong>${esc(name)}</strong><small>${esc(code)} · ${credits}학점</small></span>
+        <button type="button" class="button secondary" data-search-add="${esc(code)}" data-course-name="${esc(name)}"${added ? ' disabled' : ''}>${added ? '담김' : '담기'}</button></li>`;
+    }).join('');
+  } catch (error) {
+    if (revision === scheduleSearchRevision) {
+      scheduleSearchStatus.textContent = error.status === 404 ? '검색할 수 없어요.' : error.message;
+    }
+  }
+}
+
+scheduleCourseQuery.addEventListener('input', clearScheduleSearch);
+scheduleCourseQuery.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.isComposing) return;
+  event.preventDefault();
+  searchScheduleCourses();
+});
+$('#search-schedule-courses').addEventListener('click', searchScheduleCourses);
+scheduleSearchResults.addEventListener('click', async event => {
+  const button = event.target.closest('[data-search-add]');
+  if (!button) return;
+  const {searchAdd:code, courseName:name} = button.dataset;
+  if (readBasket().some(row => row.code === code)) return;
+  if (await saveSelection({code, name, scheduleMode:'required'})) {
+    $('#basket-status').textContent = `${name} 과목을 바구니에 담았어요.`;
+  }
+});
 
 async function handleRecommendationClick(event) {
   const view = event.target.closest('[data-view-sections]');
@@ -969,12 +1117,10 @@ document.addEventListener('keydown', event => {
 function releaseBasketLock(event) {
   const button = event.target.closest('[data-basket-unlock]');
   if (!button) return;
-  clearManualLock(button.dataset.basketUnlock);
   writeBasket(readBasket().map(row => row.code === button.dataset.basketUnlock
     ? {code:row.code, name:row.name, scheduleMode:row.scheduleMode} : row));
 }
 $('#basket-list').addEventListener('click', releaseBasketLock);
-$('#schedule-basket-list').addEventListener('click', releaseBasketLock);
 window.addEventListener('storage', event => {
   if (event.key === basketKey) {
     if (schedulePage && $('#schedule-form').hidden) showScheduleConditions();
@@ -996,22 +1142,19 @@ async function loadBasketSections(rows) {
   return (await basketSectionRequest.request).courses;
 }
 
-$('#schedule-basket-list').addEventListener('click', event => {
+$('#basket-list').addEventListener('click', event => {
   const button = event.target.closest('[data-basket-sections]');
   if (!button) return;
-  const code = button.dataset.basketSections;
-  if ($('#schedule-form').hidden) showScheduleConditions();
-  const trigger = [...$('#schedule-basket-list').querySelectorAll('[data-basket-sections]')]
-    .find(row => row.dataset.basketSections === code);
-  if (trigger) openScheduleSections(code, trigger);
+  if (button === sectionPickerTrigger) closeScheduleSections();
+  else openScheduleSections(button.dataset.basketSections, button);
 });
 
-$('#schedule-basket-list').addEventListener('change', event => {
+$('#basket-list').addEventListener('change', event => {
   const select = event.target.closest('[data-schedule-course]');
   if (!select) return;
   const code = select.dataset.scheduleCourse;
   if (writeBasket(readBasket().map(row => row.code === code ? {...row, scheduleMode:select.value} : row))) {
-    [...$('#schedule-basket-list').querySelectorAll('[data-schedule-course]')]
+    [...$('#basket-list').querySelectorAll('[data-schedule-course]')]
       .find(row => row.dataset.scheduleCourse === code)?.focus({preventScroll:true});
   }
 });
@@ -1075,12 +1218,6 @@ function renderSelectedCalendar() {
   ].filter(Boolean).join(' · ');
 }
 
-function clearManualLock(code) {
-  if (!schedulePage) return;
-  const input = $('#schedule-locks');
-  input.value = input.value.split(/[\s,]+/).filter(id => id && id.split(':')[1] !== code).join(', ');
-}
-
 async function refreshBasketPreview(rows = readBasket()) {
   const revision = ++basketPreviewRevision;
   const selected = rows.filter(row => row.offeringId);
@@ -1106,12 +1243,6 @@ async function refreshBasketPreview(rows = readBasket()) {
     renderCalendar();
     summary.textContent = error.message;
   }
-}
-
-function lockedOfferingIds() {
-  const basket = new Map(readBasket().filter(row => row.offeringId).map(row => [row.code, row.offeringId]));
-  const manual = $('#schedule-locks').value.split(/[\s,]+/).filter(Boolean);
-  return [...new Set([...basket.values(), ...manual.filter(id => !basket.has(id.split(':')[1]))])];
 }
 
 function scheduleClassDays(plan) {
@@ -1182,11 +1313,12 @@ function showSchedule(index) {
   }
   $('#schedule-preview-summary').textContent = `${index + 1}위 · ${plan.credits}학점 · 수업 요일 ${scheduleClassDays(plan).join("·")} (${plan.days}일) · ${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)} · ${scheduleGapLabel(plan)}${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
   renderCalendar(plan);
-  const locked = new Set(lockedOfferingIds());
+  const locked = new Set(readBasket().map(row => row.offeringId));
   $('#schedule-offering-table').innerHTML = `<table><thead><tr><th>과목·분반</th><th>교시</th><th>강의실</th><th>학점</th><th>별점</th><th>수강 자격</th></tr></thead>
     <tbody>${plan.offerings.map(row => `<tr>
       <td>${esc(row.course_name)}<small>${esc(row.course_code)}-${esc(row.section_code)}</small>
-        <button type="button" class="button subtle" data-lock-offering="${esc(row.offering_id)}"${locked.has(row.offering_id) ? ' disabled' : ''}>${locked.has(row.offering_id) ? '고정됨' : '분반 고정'}</button></td>
+        <button type="button" class="button subtle" data-lock-offering="${esc(row.offering_id)}"
+          data-course-code="${esc(row.course_code)}" data-course-name="${esc(row.course_name)}" data-section-code="${esc(row.section_code)}"${locked.has(row.offering_id) ? ' disabled' : ''}>${locked.has(row.offering_id) ? '고정됨' : '분반 고정'}</button></td>
       <td>${esc(row.schedule)}</td><td>${esc(row.room || '미정')}</td>
       <td>${esc(row.credits)}</td><td>${renderEverytimeRating(row.everytime_rating)}</td>
       <td>${renderEligibilityNote(row) || '제한 기록 없음'}</td>
@@ -1226,7 +1358,7 @@ $('#schedule-results').addEventListener('click', event => {
 
 $('#edit-schedule-conditions').addEventListener('click', () => {
   showScheduleConditions();
-  $('#schedule-conditions').open = true;
+  selectScheduleTab(scheduleConditionsTab);
   $('#schedule-min').focus();
 });
 
@@ -1237,22 +1369,15 @@ function showScheduleConditions() {
   renderBasket();
 }
 
-$('#schedule-offering-table').addEventListener('click', event => {
+$('#schedule-offering-table').addEventListener('click', async event => {
   const button = event.target.closest('[data-lock-offering]');
   if (!button) return;
-  const input = $('#schedule-locks');
-  const ids = new Set(input.value.split(/[\s,]+/).filter(Boolean));
-  ids.add(button.dataset.lockOffering);
-  input.value = [...ids].join(', ');
-  button.textContent = '고정됨';
-  button.disabled = true;
-  closeScheduleSections(false);
-  ++basketPreviewRevision;
-  $('#schedule-candidates').hidden = true;
-  $('#schedule-form').hidden = false;
-  input.closest('details').open = true;
-  $('#schedule-conditions').open = true;
-  $('#generate-schedule').focus();
+  const {courseCode:code, courseName:name, sectionCode, lockOffering:offeringId} = button.dataset;
+  const row = readBasket().find(row => row.code === code);
+  if (await saveSelection({code, name, sectionCode, offeringId, scheduleMode:row?.scheduleMode ?? 'required'})) {
+    $('#basket-status').textContent = `${name} ${sectionCode} 분반을 고정했어요.`;
+    $('#generate-schedule').focus();
+  }
 });
 
 function fillScheduleDefaults() {
@@ -1262,11 +1387,12 @@ function fillScheduleDefaults() {
   $('#schedule-max').value = Math.max(1, max ?? Math.max(18, min || 15));
 }
 
-$('#schedule-form').addEventListener('invalid', () => { $('#schedule-conditions').open = true; }, true);
+$('#schedule-form').addEventListener('invalid', () => selectScheduleTab(scheduleConditionsTab), true);
 $('#schedule-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = $('#generate-schedule');
   if (button.disabled) return;
+  closeScheduleSections(false);
   button.disabled = true;
   $('#schedule-results').replaceChildren();
   $('#schedule-offerings').hidden = true;
@@ -1277,13 +1403,13 @@ $('#schedule-form').addEventListener('submit', async event => {
   try {
     if (!await save()) throw new Error('학생 정보를 저장한 뒤 다시 시도해주세요.');
     const latest = await api('/api/input');
-    const selects = [...document.querySelectorAll('[data-schedule-course]')];
+    const basket = readBasket();
     const result = await api('/api/schedules', {
       version:latest.version,
       min_credits:Number($('#schedule-min').value), max_credits:Number($('#schedule-max').value),
-      required:selects.filter(row => row.value === 'required').map(row => row.dataset.scheduleCourse),
-      locked_offering_ids:lockedOfferingIds(),
-      preferred:selects.filter(row => row.value === 'preferred').map(row => row.dataset.scheduleCourse),
+      required:basket.filter(row => !row.offeringId && row.scheduleMode === 'required').map(row => row.code),
+      locked_offering_ids:basket.filter(row => row.offeringId).map(row => row.offeringId),
+      preferred:basket.filter(row => !row.offeringId && row.scheduleMode === 'preferred').map(row => row.code),
       blocked_days:[...document.querySelectorAll('[name="blocked-day"]:checked')].map(row => row.value),
       sort:$('#schedule-sort').value,
     });

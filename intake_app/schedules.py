@@ -11,6 +11,7 @@ from time import monotonic
 from crawl_module.classroom_dist.classroom_dist import DEFAULT_DB as DISTANCE_DB, building_names, lookup_key
 
 from .domain import ensure
+from .offerings import LECTURE_CODE, normalized_name
 from .recommendations import recommend
 
 DAYS = "월화수목금토일"
@@ -110,10 +111,49 @@ def request_codes(value, field):
     return set(entries)
 
 
+def basket_schedule_context(database, document, *, ratings_db=None):
+    document = dict(document, student=dict(document["student"], target_term=None, recognition_notes=""))
+    return recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+
+
+def search_schedule_courses(database, document, request, *, ratings_db=None):
+    query = request.get("query")
+    ensure(isinstance(query, str) and len(query) <= 80, "검색어는 80자 이내로 입력해주세요.")
+    query = normalized_name(query)
+    ensure(query, "강좌코드 또는 강좌명을 입력해주세요.")
+    lecture_code = LECTURE_CODE.fullmatch(query)
+    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    matches = {}
+    for row in pool:
+        code, name, credits = row["course_code"], row["course_name"], row["credits"]
+        if lecture_code:
+            if lecture_code.groups() != (code, row["section_code"]):
+                continue
+            rank = 0
+        else:
+            name_key = normalized_name(name)
+            english_key = normalized_name(row["english_name"])
+            if query == code or query in (name_key, english_key):
+                rank = 0
+            elif any(key.startswith(query) for key in (code, name_key, english_key)):
+                rank = 1
+            elif query in name_key or query in english_key:
+                rank = 2
+            else:
+                continue
+        if credits is None or credits <= 0 or not parse_meetings(row["schedule"]):
+            continue
+        key = (rank, name, code)
+        if code not in matches or key < matches[code][0]:
+            matches[code] = (key, dict(course_code=code, course_name=name, credits=credits))
+    ordered = sorted(matches.values())
+    return dict(target_term=result["target_term"], total=len(ordered),
+                courses=[course for _, course in ordered[:20]])
+
+
 def basket_sections(database, document, request, *, ratings_db=None):
     codes = request_codes(request, "courses")
-    document = dict(document, student=dict(document["student"], target_term=None, recognition_notes=""))
-    result, pool, _, _, _ = recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
     courses = {}
     for row in pool:
         code = row["course_code"]

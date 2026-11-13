@@ -33,30 +33,49 @@
       <header class="schedule-heading"><h1 id="schedule-title">시간표 만들기</h1><span id="schedule-term"></span></header>
       <div class="schedule-workspace">
       <div class="schedule-controls">
-      <form id="schedule-form" class="card schedule-form">
-        <h2 id="schedule-picker-title">추천 과목</h2>
-        <div class="schedule-picker-body">
-          <div id="schedule-recommendations"></div>
+      <form id="schedule-form" class="card">
+        <div class="schedule-tabs" role="tablist" aria-label="시간표 설정">
+          <button type="button" id="schedule-conditions-tab" role="tab" aria-controls="schedule-conditions" aria-selected="false" tabindex="-1">생성 조건</button>
+          <button type="button" id="schedule-basket-tab" role="tab" aria-controls="schedule-course-picker" aria-selected="true">바구니</button>
         </div>
-        <section id="schedule-section-picker" role="dialog" hidden aria-labelledby="schedule-section-title">
-          <div class="schedule-section-header"><h3 id="schedule-section-title"></h3><button type="button" class="button secondary" id="close-schedule-sections">닫기</button></div>
-          <div id="schedule-section-list"></div>
-        </section>
-        <p id="schedule-section-error" class="field-hint" role="status" hidden></p>
-        <details id="schedule-conditions" class="schedule-conditions">
-        <summary>생성 조건</summary>
-        <div class="form-grid">
-          <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
-          <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
-          <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">동률이면 수업 요일 적게</option><option value="least_gap">동률이면 수업 사이 빈 시간 적게</option></select></label>
+        <div id="schedule-conditions" role="tabpanel" aria-labelledby="schedule-conditions-tab" hidden>
+          <div class="form-grid">
+            <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
+            <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
+            <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">동률이면 수업 요일 적게</option><option value="least_gap">동률이면 수업 사이 빈 시간 적게</option></select></label>
+          </div>
+          <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
+            <div class="tags" id="schedule-days"></div>
+          </fieldset>
         </div>
-        <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
-          <div class="tags" id="schedule-days"></div>
-        </fieldset>
-        <details class="schedule-options"><summary>고정 분반</summary>
-          <label>고정할 분반 ID<input id="schedule-locks" placeholder="후보에서 분반 고정 버튼을 누르세요"></label>
-        </details>
-        </details>
+        <div id="schedule-course-picker" role="tabpanel" aria-labelledby="schedule-basket-tab" tabindex="0">
+          <section id="schedule-basket" aria-labelledby="schedule-basket-title">
+            <h2 id="schedule-basket-title" tabindex="-1">담은 과목 <span id="schedule-basket-count" class="count">0</span></h2>
+            <details id="schedule-course-search">
+              <summary>+ 과목 추가</summary>
+              <div class="schedule-search-controls">
+                <input id="schedule-course-query" type="search" maxlength="80" aria-label="강좌코드 또는 강좌명" placeholder="강좌코드 또는 강좌명">
+                <button id="search-schedule-courses" class="button secondary" type="button">검색</button>
+              </div>
+              <p id="schedule-search-status" class="field-hint" role="status"></p>
+              <ul id="schedule-search-results"></ul>
+            </details>
+            <div id="schedule-basket-content"></div>
+          </section>
+          <h2 id="schedule-recommendations-title">추천 과목</h2>
+          <section id="schedule-recommendation-pane" aria-labelledby="schedule-recommendations-title">
+            <div class="schedule-picker-body">
+              <div id="schedule-recommendations"></div>
+            </div>
+            <div id="schedule-section-area">
+              <section id="schedule-section-picker" role="dialog" hidden aria-labelledby="schedule-section-title">
+                <div class="schedule-section-header"><h3 id="schedule-section-title"></h3><button type="button" class="button secondary" id="close-schedule-sections">닫기</button></div>
+                <div id="schedule-section-list"></div>
+              </section>
+              <p id="schedule-section-error" class="field-hint" role="status" hidden></p>
+            </div>
+          </section>
+        </div>
         <button class="button primary" id="generate-schedule" type="submit">시간표 생성</button>
       </form>
       <p id="schedule-status" role="status"></p>
@@ -69,10 +88,6 @@
       </section>
       </div>
       <section class="card schedule-preview" aria-labelledby="schedule-preview-title">
-        <section id="schedule-selection" aria-labelledby="schedule-selection-title">
-          <h2 id="schedule-selection-title">선택 과목 <span id="schedule-basket-count" class="count">0</span></h2>
-          <div id="schedule-basket-list"></div>
-        </section>
         <h2 id="schedule-preview-title">주간 시간표</h2>
         <button id="return-to-schedule-sections" class="button secondary" type="button" hidden>분반 목록으로</button>
         <p id="schedule-preview-summary" role="status"></p>
