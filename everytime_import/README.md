@@ -2,13 +2,13 @@
 
 공유 링크의 학기별 수강내역을 가져오는 독립 모듈이다. 공식 개설강좌 API와 과목 연결은 구현하지 않는다. 기존 `intake_app`의 저장 데이터나 UI를 변경하지 않는다.
 
-Python 3.10 이상과 PowerShell(`pwsh` 또는 `powershell`)이 필요하다. 추가 Python 패키지는 필요 없다. 프로젝트 루트 `C:\dev\2026 해커톤`에서 실행한다.
+Python 3.10 이상과 PowerShell(`pwsh` 또는 `powershell`)이 필요하다. 추가 Python 패키지는 필요 없다. 현재 체크아웃한 저장소 루트(`AGENTS.md`가 있는 폴더)에서 실행한다.
 
 ```powershell
 python -B -m everytime_import 'https://everytime.kr/@공유식별자'
 ```
 
-기본 결과: `C:\dev\2026 해커톤\everytime_import\runtime\course_import.json`
+기본 결과(저장소 루트 기준): `everytime_import/runtime/course_import.json`
 
 ```powershell
 python -B -m everytime_import 'https://everytime.kr/@공유식별자' --output 'everytime_import/runtime/my_courses.json'
