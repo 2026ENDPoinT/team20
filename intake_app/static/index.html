@@ -6,7 +6,7 @@
   <a class="brand" href="/" aria-label="수강나침반 홈"><span class="brand-icon">↗</span><span>수강나침반<small>COURSE COMPASS</small></span></a>
   <div class="workspace-label">MY WORKSPACE</div>
   <div class="nav-current"><span>▦</span> 내 수강 정보 <span class="nav-dot"></span></div>
-  <div class="nav-future">◇ <span>과목 추천</span><small>준비 중</small></div>
+  <button type="button" id="recommend-nav" class="nav-future">◇ <span>과목 추천</span></button>
   <div class="nav-future">▤ <span>시간표 플랜</span><small>준비 중</small></div>
   <div class="sidebar-bottom"><span class="campus-mark">S</span><div>서울과학기술대학교<small>컴퓨터공학과 · 해커톤 2026</small></div></div>
 </aside>
@@ -70,6 +70,11 @@
         <div class="list-heading"><h2>공식 개설강좌 대조</h2><button id="compare-offerings" class="button secondary">저장한 이수 과목 대조</button></div>
         <p id="comparison-summary" role="status"></p>
         <div id="comparison-table" class="table-wrap"></div>
+      </section>
+      <section class="card" id="recommendations">
+        <div class="list-heading"><h2>과목 추천</h2><button id="run-recommendations" class="button primary">추천 보기</button></div>
+        <p id="recommendation-summary" role="status"></p>
+        <div id="recommendation-results"></div>
       </section>
     </section>
     <footer class="actionbar"><div id="save-state">아직 저장하지 않았어요</div><div class="button-row"><button id="export" class="button subtle">JSON 내보내기</button><button id="save" class="button secondary">임시 저장</button><button id="next" class="button primary">이수 내역 입력 <span>→</span></button></div></footer>

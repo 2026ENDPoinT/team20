@@ -12,6 +12,13 @@
 .course-detail-row > td { background: #f8f9fc; white-space: normal; }
 .course-detail-row .course-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .course-detail-row .button-row { margin-top: 9px; }
+#recommend-nav { border: 0; background: transparent; text-align: left; color: #dfe9ff; }
+#recommend-nav:hover { background: #294575; }
+#recommendation-results td:nth-child(3) { white-space: normal; min-width: 140px; }
+#recommendation-results .table-wrap { margin-bottom: 12px; }
+.recommendation-group { margin-block: 16px; padding-block: 12px; border-top: 1px solid var(--line); }
+.recommendation-group summary { cursor: pointer; font-weight: 600; }
+.recommendation-group[open] > summary { margin-bottom: 8px; }
 @media (max-width: 720px) {
   .course-table .course-code { display: none; }
   .course-table td, .course-table th { padding: 6px 4px; }

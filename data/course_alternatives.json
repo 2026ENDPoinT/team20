@@ -1,0 +1,32 @@
+{
+  "sources": {
+    "2021": "https://recruit.seoultech.ac.kr/storage/recruit/lect/ckfinder/files/SNUST1640155727876.pdf#page=289",
+    "2022": "https://www.seoultech.ac.kr/storage/www/life/info/college/schedule/2022_curiculum.pdf#page=304",
+    "2023": "https://www.seoultech.ac.kr/storage/www/life/info/college/schedule/2023_curiculum.pdf#page=311",
+    "2024": "https://www.seoultech.ac.kr/storage/www/life/info/college/schedule/2024_curiculum.pdf#page=303",
+    "2025": "https://www.seoultech.ac.kr/storage/www/ckfinder/files/A883BD013B0D46939A67E13582305A60.pdf#page=308",
+    "2026": "https://www.seoultech.ac.kr/storage/www/ckfinder/files/CA859F6CA02744F8897EB7372666F6DD.pdf#page=52"
+  },
+  "major_elective_groups": [
+    {"title": "컴퓨터공학개론", "course_codes": ["109814", "109815"], "curriculum_groups": {"2021": 2, "2022": 2, "2023": 2, "2024": 2, "2025": 2, "2026": 2}},
+    {"title": "객체지향프로그래밍언어", "course_codes": ["109816", "109817"], "curriculum_groups": {"2021": 6, "2022": 6, "2023": 6, "2024": 6, "2025": 6, "2026": 6}},
+    {"title": "유닉스시스템", "course_codes": ["109818", "109819"], "curriculum_groups": {"2021": 7, "2022": 7, "2023": 7, "2024": 7, "2025": 7, "2026": 7}},
+    {"title": "유닉스프로그래밍", "course_codes": ["109424", "109482"], "curriculum_groups": {"2021": 8, "2022": 8, "2023": 8, "2024": 8, "2025": 8}},
+    {"title": "웹프로그래밍", "course_codes": ["109261", "109425"], "curriculum_groups": {"2021": 5, "2022": 5, "2023": 5, "2024": 5, "2025": 5}},
+    {"title": "컴퓨터그래픽스", "course_codes": ["109029", "109031"], "curriculum_groups": {"2021": 9, "2022": 9, "2023": 9, "2024": 9, "2025": 9}},
+    {"title": "선형대수학", "course_codes": ["109073", "109829"], "curriculum_groups": {"2023": 10, "2024": 10, "2025": 10, "2026": 10}},
+    {"title": "확률및랜덤변수", "course_codes": ["109074", "109830"], "curriculum_groups": {"2023": 11, "2024": 11, "2025": 11, "2026": 11}},
+    {"title": "자료구조", "course_codes": ["109220", "109831"], "curriculum_groups": {"2023": 12, "2024": 12, "2025": 12, "2026": 12}},
+    {"title": "디지털논리", "course_codes": ["109256", "109832"], "curriculum_groups": {"2023": 13}},
+    {"title": "오픈소스소프트웨어", "course_codes": ["109075", "109833"], "curriculum_groups": {"2023": 14, "2024": 14, "2025": 14, "2026": 14}},
+    {"title": "데이터베이스", "course_codes": ["109341", "109834"], "curriculum_groups": {"2023": 15, "2024": 15, "2025": 15, "2026": 15}},
+    {"title": "소프트웨어공학", "course_codes": ["109130", "109835"], "curriculum_groups": {"2023": 16, "2024": 16, "2025": 16, "2026": 16}},
+    {"title": "프로그래밍언어론", "course_codes": ["109324", "109836"], "curriculum_groups": {"2023": 17, "2024": 17, "2025": 17, "2026": 17}},
+    {"title": "스마트앱프로그래밍", "course_codes": ["109046", "109837"], "curriculum_groups": {"2023": 18, "2024": 18}},
+    {"title": "형식언어및오토마타", "course_codes": ["109084", "109838"], "curriculum_groups": {"2023": 19, "2024": 19, "2025": 19, "2026": 19}},
+    {"title": "멀티미디어시스템", "course_codes": ["109486", "109839"], "curriculum_groups": {"2023": 20, "2024": 20}},
+    {"title": "디지털논리및시스템", "course_codes": ["109842", "109843"], "curriculum_groups": {"2024": 21, "2025": 21, "2026": 21}},
+    {"title": "기계학습", "course_codes": ["109078", "109509"], "curriculum_groups": {"2025": 4, "2026": 4}},
+    {"title": "강화학습", "course_codes": ["109845", "109510"], "curriculum_groups": {"2025": 13, "2026": 13}}
+  ]
+}
