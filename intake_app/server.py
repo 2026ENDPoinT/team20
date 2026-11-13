@@ -15,7 +15,7 @@ from .domain import ValidationError, ensure, validate_document, document_warning
 from .imports import apply_import, check_import_sources, prepare_import, replace_import
 from .offerings import compare_offerings
 from .recommendations import recommend
-from .schedules import basket_sections, generate
+from .schedules import basket_sections, generate, search_schedule_courses
 from .interest_tags import load_tags
 from .store import Store, ConflictError
 
@@ -24,6 +24,11 @@ MAX_BODY = 12 * 1024 * 1024
 OFFICIAL_DB = BASE.parent / 'db' / 'courses.sqlite3'
 RATINGS_DB = BASE.parent / 'db' / 'everytime_ratings.sqlite3'
 EMPTY_DOCUMENT = {'student': {}, 'course_attempts': []}
+SCHEDULE_ACTIONS = {
+    '/api/schedules': generate,
+    '/api/schedules/sections': basket_sections,
+    '/api/schedules/search': search_schedule_courses,
+}
 
 class Application(ThreadingHTTPServer):
     daemon_threads = True
@@ -74,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {'error': '로컬 앱에서 접근해주세요.'})
         path = urlsplit(self.path).path
         static = {'/': ('index.html', 'text/html'), '/recommendations': ('index.html', 'text/html'), '/schedules': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        if path in ('/fonts/gowun-batang-bold.woff', '/fonts/noto-sans-kr.woff'):
+            return self.send_bytes(200, (BASE / 'static' / path.lstrip('/')).read_bytes(), 'font/woff')
         if path in static:
             filename, mime = static[path]
             return self.send_bytes(200, (BASE / 'static' / filename).read_bytes(), mime + '; charset=utf-8')
@@ -81,6 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             tags, aliases, _ = load_tags()
             return self.respond(200, {
                 'csrf_token': self.server.token,
+                'schedule_course_exclusions': True,
                 'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
                 'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
             })
@@ -96,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {'error': '앱을 새로고침한 뒤 다시 시도해주세요.'})
         path = urlsplit(self.path).path
         if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare',
-                        '/api/recommendations', '/api/schedules', '/api/schedules/sections'):
+                        '/api/recommendations') and path not in SCHEDULE_ACTIONS:
             return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
         try:
             self.connection.settimeout(110)
@@ -113,10 +121,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.commit_import(value, version)
             if path == '/api/offerings/compare':
                 return self.compare_saved(version)
-            if path in ('/api/schedules', '/api/schedules/sections'):
+            if path in SCHEDULE_ACTIONS:
                 saved = self.load_version(version)
                 ensure(saved['document'] is not None, '내 정보에서 학생 정보를 먼저 저장해주세요.')
-                action = basket_sections if path.endswith('/sections') else generate
+                action = SCHEDULE_ACTIONS[path]
                 result = action(self.server.official_db, validate_document(saved['document']), value,
                                 ratings_db=self.server.ratings_db)
                 self.load_version(version)

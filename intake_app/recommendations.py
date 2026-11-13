@@ -323,15 +323,28 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
             candidate['alternative_group'] = alternative_by_code[code]
         items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest,
                        -(rating_score(lead) or 0), code), candidate))
+    core_areas = {id: codes(rules[id]) for id in ('core_1', 'core_2', 'core_3') if id in rules}
+    core_areas.update({f"core_{area['area']}": codes(area) for area in data.get('elective_core_areas', ())})
+    area_by_code = {code: area for area, members in core_areas.items() for code in members}
+    selection_groups = defaultdict(list)
+    for area, members in core_areas.items():
+        for code in members:
+            selection_groups[code].append(area)
+    for id, rule in rules.items():
+        if id not in core_areas and rule['type'] == 'choose_n' and rule.get('min', 1) == 1:
+            for code in codes(rule):
+                selection_groups[code].append(id)
+    for code, group in alternative_by_code.items():
+        selection_groups[code].append(f"alternative:{group['id']}")
     items.sort(key=lambda item: item[0])
     response = dict(kind='course_recommendations', schema_version=2, target_term=student['target_term'],
                 snapshot=target, requirements=results, credit_reviews=credit_reviews,
                 partial=bool(credit_reviews) or any(row['status'] == 'needs_review' for row in results),
-                candidates=[item for _, item in items])
+                candidates=[item for _, item in items], selection_groups=dict(selection_groups),
+                core_area_titles={**{id: rules[id]['title'] for id in core_areas if id in rules},
+                                  **{f"core_{row['area']}": f"핵심교양 {row['area']}영역 {row['title']}"
+                                     for row in data.get('elective_core_areas', ())}})
     if schedule_context:
-        core_areas = {id: codes(rules[id]) for id in ('core_1', 'core_2', 'core_3') if id in rules}
-        core_areas.update({f"core_{area['area']}": codes(area) for area in data.get('elective_core_areas', ())})
-        area_by_code = {code: area for area, members in core_areas.items() for code in members}
         occupied_areas = {area for area, members in core_areas.items()
                           if members & blocked or statuses.get(area) == 'met'}
         pool = [

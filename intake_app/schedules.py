@@ -11,7 +11,7 @@ from time import monotonic
 from crawl_module.classroom_dist.classroom_dist import DEFAULT_DB as DISTANCE_DB, building_names, lookup_key
 
 from .domain import ensure
-from .offerings import rating_score
+from .offerings import LECTURE_CODE, normalized_name, rating_score
 from .recommendations import recommend
 
 DAYS = "월화수목금토일"
@@ -113,10 +113,49 @@ def request_codes(value, field):
     return set(entries)
 
 
+def basket_schedule_context(database, document, *, ratings_db=None):
+    document = dict(document, student=dict(document["student"], target_term=None, recognition_notes=""))
+    return recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+
+
+def search_schedule_courses(database, document, request, *, ratings_db=None):
+    query = request.get("query")
+    ensure(isinstance(query, str) and len(query) <= 80, "검색어는 80자 이내로 입력해주세요.")
+    query = normalized_name(query)
+    ensure(query, "강좌코드 또는 강좌명을 입력해주세요.")
+    lecture_code = LECTURE_CODE.fullmatch(query)
+    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    matches = {}
+    for row in pool:
+        code, name, credits = row["course_code"], row["course_name"], row["credits"]
+        if lecture_code:
+            if lecture_code.groups() != (code, row["section_code"]):
+                continue
+            rank = 0
+        else:
+            name_key = normalized_name(name)
+            english_key = normalized_name(row["english_name"])
+            if query == code or query in (name_key, english_key):
+                rank = 0
+            elif any(key.startswith(query) for key in (code, name_key, english_key)):
+                rank = 1
+            elif query in name_key or query in english_key:
+                rank = 2
+            else:
+                continue
+        if credits is None or credits <= 0 or not parse_meetings(row["schedule"]):
+            continue
+        key = (rank, name, code)
+        if code not in matches or key < matches[code][0]:
+            matches[code] = (key, dict(course_code=code, course_name=name, credits=credits))
+    ordered = sorted(matches.values())
+    return dict(target_term=result["target_term"], total=len(ordered),
+                courses=[course for _, course in ordered[:20]])
+
+
 def basket_sections(database, document, request, *, ratings_db=None):
     codes = request_codes(request, "courses")
-    document = dict(document, student=dict(document["student"], target_term=None, recognition_notes=""))
-    result, pool, _, _, _ = recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
     courses = {}
     for row in pool:
         code = row["course_code"]
@@ -139,13 +178,14 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         upper = int(student["max_credits"]) if student.get("max_credits") is not None else 18
     ensure(type(lower) is int and type(upper) is int and 1 <= lower <= upper <= 30,
            "학점 범위는 1~30 사이의 정수로 입력해주세요.")
-    required = request_codes(request, "required")
-    preferred = request_codes(request, "preferred") - required
+    excluded = request_codes(request, "excluded")
+    required = request_codes(request, "required") - excluded
+    preferred = request_codes(request, "preferred") - required - excluded
     locked = request.get("locked_offering_ids", [])
     ensure(isinstance(locked, list) and len(locked) <= 30
            and all(isinstance(item, str) and 0 < len(item) <= 100 for item in locked),
            "고정 분반 목록을 확인해주세요.")
-    locked = set(locked)
+    locked = {item for item in locked if item.partition(":")[2].partition(":")[0] not in excluded}
     blocked = request.get("blocked_days", [])
     ensure(isinstance(blocked, list) and all(isinstance(day, str) and day in tuple(DAYS) for day in blocked),
            "제외할 요일을 확인해주세요.")
@@ -173,6 +213,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     late_courses = set()
     for section in pool:
         code = section["course_code"]
+        if code in excluded:
+            continue
         candidate = candidates.get(code, {})
         rule_ids = candidate.get("requirement_ids", ())
         explicitly_selected = code in required or code in preferred or section["offering_id"] in locked
@@ -267,6 +309,11 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     if len(set(required_areas)) != len(required_areas):
         response["issues"] = ["같은 핵심교양 영역에서 둘 이상 필수 과목으로 지정했습니다."]
         return dict(response, outcome="no_feasible_plan", search_status="complete")
+    selection_groups = {code: set(groups) for code, groups in result["selection_groups"].items()}
+    required_groups = [group for code in required for group in selection_groups.get(code, ())]
+    if len(set(required_groups)) != len(required_groups):
+        response["issues"] = ["같은 택1 요건에서 둘 이상 필수 과목으로 지정했습니다."]
+        return dict(response, outcome="no_feasible_plan", search_status="complete")
     for items in options.values():
         items.sort(key=lambda option: (option.uncertain, -(option.rating or 0), option.section["section_code"]))
     # Explore both elective buckets early, even when one has many more offerings.
@@ -297,7 +344,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     truncated = False
     chosen = []
     used = set()
-    used_areas = set()
+    used_selection_groups = set()
     low, high = lower * 100, upper * 100
     max_required = len(required)
 
@@ -365,17 +412,16 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         for position in range(index, len(keys)):
             if truncated or units + remaining[position] < low:
                 return
+            groups = selection_groups.get(keys[position], ())
             for item in options[keys[position]]:
                 if (units + item.units > high or mask & item.mask or item.group in used
-                        or item.core_area in used_areas):
+                        or not used_selection_groups.isdisjoint(groups)):
                     continue
                 chosen.append(item)
                 used.add(item.group)
-                if item.core_area:
-                    used_areas.add(item.core_area)
+                used_selection_groups.update(groups)
                 search(position + 1, mask | item.mask, units + item.units)
-                if item.core_area:
-                    used_areas.remove(item.core_area)
+                used_selection_groups.difference_update(groups)
                 used.remove(item.group)
                 chosen.pop()
                 if truncated:
