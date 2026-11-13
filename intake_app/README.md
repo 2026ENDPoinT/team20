@@ -17,7 +17,7 @@ $pythonExe = 'C:\Program Files\WindowsApps\OpenAI.CodexPrimaryRuntime.v26-1110-9
 & $pythonExe -B -m intake_app.server
 ~~~
 
-브라우저에서 [로컬 앱](http://127.0.0.1:8765)을 엽니다. `--port`와 `--db`로 포트와 학생 저장 경로를 지정할 수 있습니다. 공식 강좌는 기본으로 `db/courses.sqlite3`를 읽고, `--official-db`로 다른 자료를 지정할 수 있습니다. 에브리타임 수집에는 PowerShell이 필요합니다. 종료는 터미널에서 Ctrl+C입니다.
+브라우저에서 [로컬 앱](http://127.0.0.1:8765)을 엽니다. `--port`와 `--db`로 포트와 학생 저장 경로를 지정할 수 있습니다. 공식 강좌는 기본으로 `db/courses.sqlite3`를 읽고, `--official-db`로 다른 자료를 지정할 수 있습니다. 에브리타임 가져오기는 서버의 Python에서 공개 시간표를 조회합니다. 종료는 터미널에서 Ctrl+C입니다.
 
 ## 입력과 저장
 

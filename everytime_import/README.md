@@ -2,7 +2,7 @@
 
 공유 링크의 학기별 수강내역을 가져오는 모듈이다. CLI는 수집 JSON을 저장한다. [입력 앱](../intake_app/README.md)에서는 수집 결과를 미리 보고 저장한 뒤 공식 개설강좌 DB와 대조할 수 있다.
 
-Python 3.10 이상과 PowerShell(`pwsh` 또는 `powershell`)이 필요하다. 추가 Python 패키지는 필요 없다. 현재 체크아웃한 저장소 루트(`AGENTS.md`가 있는 폴더)에서 실행한다.
+Python 3.10 이상을 사용한다. 시간표 조회에는 Python 표준 HTTP 라이브러리를 사용한다. 현재 체크아웃한 저장소 루트(`AGENTS.md`가 있는 폴더)에서 실행한다.
 
 ```powershell
 python -B -m everytime_import 'https://everytime.kr/@공유식별자'
@@ -21,7 +21,7 @@ python -B -m everytime_import 'https://everytime.kr/@공유식별자' --output '
 - `https://everytime.kr/@공유식별자`와 `https://everytime.kr/app/@공유식별자`를 모두 지원한다.
 - `POST https://api.everytime.kr/find/timetable/table/friend`
 - `application/x-www-form-urlencoded`: `identifier=...&friendInfo=true`
-- PowerShell로 요청하고 Python 표준 XML 파서로 해석한다.
+- Python 표준 HTTP 라이브러리로 조회하고 표준 XML 파서로 해석한다.
 - `primaryTables`에서 발견한 식별자를 중복 없이 순회한다. 기본 최대 100개이며 `--max-tables`로 줄일 수 있다.
 - 정규학기는 `YYYY-1`, `YYYY-2`, 계절학기는 `YYYY-summer`, `YYYY-winter`로 변환한다.
 - 빈 시간표도 조회 성공으로 기록한다. 오류·접근 불가·학기 불일치는 실패로 기록하며 성공한 학기의 결과는 보존한다.

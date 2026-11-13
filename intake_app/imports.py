@@ -22,7 +22,10 @@ def check_import_sources(document, stored):
 
 
 def prepare_import(collection, document, origins):
-    ensure(collection['timetables'], '공유 시간표를 읽지 못했습니다. 링크 공개 상태를 확인해주세요.')
+    if not collection['timetables']:
+        failures = collection['failures']
+        message = failures[0]['message'] if failures else '공유 링크에서 시간표를 찾지 못했습니다.'
+        ensure(False, message)
     ensure(len(collection['course_attempts']) <= 300, '공유 과목이 300개를 초과했습니다.')
     existing = document['course_attempts']
     by_key = {row['source_ref']['source_key']: row for row in existing if row['source_ref']}

@@ -5,11 +5,11 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
 import tempfile
 from time import monotonic
-from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import NAMESPACE_URL, uuid5
 import xml.etree.ElementTree as ET
 
@@ -103,32 +103,35 @@ def parse_table(xml, expected_identifier):
                 references=references, warnings=warnings)
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def fetch_xml(identifier, *, timeout=40):
-    """PowerShell is the tested transport; subprocess input is data, never shell code."""
     if not IDENTIFIER.fullmatch(identifier):
         raise ImportFailure('시간표 식별자가 잘못되었습니다.')
-    executable = shutil.which('pwsh') or shutil.which('powershell')
-    if not executable:
-        raise ImportFailure('PowerShell(pwsh 또는 powershell)이 필요합니다.')
+    body = urlencode({'identifier': identifier, 'friendInfo': 'true'}).encode('ascii')
+    request = Request('https://api.everytime.kr/find/timetable/table/friend', data=body,
+                      headers={'Content-Type': 'application/x-www-form-urlencoded',
+                               'User-Agent': 'CourseCompass/1.0', 'Accept': '*/*'})
     try:
-        result = subprocess.run(
-            [executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-             str(Path(__file__).with_name('transport.ps1'))],
-            input=json.dumps({'identifier': identifier}), capture_output=True,
-            encoding='utf-8', timeout=timeout,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-        payload = json.loads(result.stdout.lstrip('\ufeff'))
-    except subprocess.TimeoutExpired as exc:
-        raise ImportFailure('시간표 요청 시간이 초과됐습니다.') from exc
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ImportFailure('PowerShell 응답을 읽지 못했습니다.') from exc
-    if not isinstance(payload, dict) or result.returncode or payload.get('ok') is not True:
-        status = payload.get('status') if isinstance(payload, dict) else None
-        raise ImportFailure(f'시간표 요청 실패 (HTTP {status or "상태 확인 불가"}).')
-    xml = payload.get('xml')
-    if not isinstance(xml, str):
-        raise ImportFailure('시간표 XML이 없습니다.')
-    return xml
+        with build_opener(NoRedirect()).open(request, timeout=timeout) as response:
+            raw = response.read(MAX_XML_BYTES + 1)
+    except HTTPError as exc:
+        exc.close()
+        raise ImportFailure(f'에브리타임 시간표 조회 실패 (HTTP {exc.code}).') from exc
+    except (URLError, OSError) as exc:
+        reason = exc.reason if isinstance(exc, URLError) else exc
+        message = ('에브리타임 시간표 조회 시간이 초과됐습니다.' if isinstance(reason, TimeoutError)
+                   else '서버에서 에브리타임에 연결하지 못했습니다.')
+        raise ImportFailure(message) from exc
+    if len(raw) > MAX_XML_BYTES:
+        raise ImportFailure('시간표 응답이 허용 크기를 초과했습니다.')
+    try:
+        return raw.decode('utf-8-sig')
+    except UnicodeError as exc:
+        raise ImportFailure('에브리타임 응답을 UTF-8로 읽지 못했습니다.') from exc
 
 
 def collect(shared_url, *, fetcher=fetch_xml, max_tables=100, timeout=None):
