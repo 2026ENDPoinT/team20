@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: team20-course-compass
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r intake_app/requirements-render.txt
+    startCommand: python -m intake_app.public
+    healthCheckPath: /healthz
+    autoDeployTrigger: 'off'

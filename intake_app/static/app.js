@@ -5,6 +5,25 @@ const days = {MON:'월',TUE:'화',WED:'수',THU:'목',FRI:'금',SAT:'토',SUN:'�
 const initial = () => ({kind:'student_input',schema_version:2,student:{department_id:'DEPT_CS',admission_year:null,grade:null,admission_type:'freshman',regular_terms_completed:null,min_credits:null,max_credits:null,interests:[],transfer_recognized_credits:null},history_complete:false,course_attempts:[]});
 let state=initial(), version=0, csrf='', step=1, dirty=false, edits=0, saving=false, importPreview=null, importing=false;
 const draftKey = 'course-compass-input-draft';
+const profileKey = 'course-compass-public-profile';
+let browserStorage = false;
+let importVisitor;
+function readBrowserProfile() {
+  const saved = localStorage.getItem(profileKey);
+  return saved ? JSON.parse(saved) : {version:0, document:null, review_state:'draft', updated_at:null};
+}
+function writeBrowserProfile(expectedVersion, result, reviewed) {
+  const write = () => {
+    if (readBrowserProfile().version !== expectedVersion) {
+      throw Object.assign(new Error('다른 창에서 학생 정보를 저장했어요. 새로고침한 뒤 확인해주세요.'), {status:409});
+    }
+    const saved = {version:expectedVersion + 1, document:result.document,
+      review_state:reviewed ? 'reviewed' : 'draft', updated_at:new Date().toISOString()};
+    localStorage.setItem(profileKey, JSON.stringify(saved));
+    return {...saved, warnings:result.warnings};
+  };
+  return navigator.locks ? navigator.locks.request(profileKey, write) : write();
+}
 const recommendationPage = location.pathname === '/recommendations';
 const schedulePage = location.pathname === '/schedules';
 document.title = (schedulePage ? '시간표 생성' : recommendationPage ? '과목 추천' : '홈') + ' · 수강나침반';
@@ -40,7 +59,41 @@ function forgetDraft(savedDocument) {
     }
   } catch { /* Browser storage is optional. */ }
 }
-async function api(path,payload){const options=payload===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':csrf},body:JSON.stringify(payload)};const response=await fetch(path,options);let data;try{data=await response.json();}catch{throw new Error('서버 응답을 읽을 수 없습니다. 서버 실행 상태를 확인해주세요.');}if(!response.ok)throw Object.assign(new Error(data.error||'요청에 실패했습니다.'),{status:response.status});return data;}
+async function requestApi(path, payload, retry = true) {
+  const headers = {'Content-Type':'application/json','X-App-Token':csrf};
+  if (browserStorage && path.startsWith('/api/import/')) {
+    importVisitor ??= crypto.randomUUID();
+    headers['X-Course-Visitor'] = importVisitor;
+  }
+  const options = payload === undefined ? {} : {method:'POST', headers, body:JSON.stringify(payload)};
+  const response = await fetch(path, options);
+  if (browserStorage && payload !== undefined && response.status === 403 && retry) {
+    const config = await requestApi('/api/config');
+    csrf = config.csrf_token;
+    return requestApi(path, payload, false);
+  }
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error('서버 응답을 읽을 수 없습니다. 잠시 뒤 다시 시도해주세요.'); }
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || '요청에 실패했습니다.'), {status:response.status});
+  }
+  return data;
+}
+
+async function api(path, payload) {
+  if (!browserStorage || path === '/api/config') return requestApi(path, payload);
+  const saved = readBrowserProfile();
+  if (path === '/api/input' && payload === undefined) return saved;
+  if (saved.version !== payload.version) {
+    throw Object.assign(new Error('다른 창에서 학생 정보를 저장했어요. 새로고침한 뒤 확인해주세요.'), {status:409});
+  }
+  const result = await requestApi(path, {...payload, document:payload.document ?? saved.document ?? initial()});
+  if (path === '/api/input' || path === '/api/import/apply') {
+    return writeBrowserProfile(saved.version, result, payload.reviewed === true);
+  }
+  return result;
+}
 function fillProfile(){for(const [id,key] of Object.entries(fields))$('#'+id).value=state.student[key]??'';$('#transfer-box').hidden=state.student.admission_type!=='transfer';renderTags();}
 function renderTags() {
   $('#tags').innerHTML = ['전공', '교양'].map(group => `<fieldset class="interest-group">
@@ -417,6 +470,8 @@ async function init() {
   try {
     const config = await api('/api/config');
     csrf = config.csrf_token;
+    browserStorage = config.browser_storage === true;
+    $('#browser-storage-notice').hidden = !browserStorage;
     supportsScheduleExclusions = config.schedule_course_exclusions === true;
     tags = config.interest_tags;
     interestAliases = config.interest_aliases;
