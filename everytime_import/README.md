@@ -1,6 +1,6 @@
 # 에브리타임 공유 시간표 → JSON
 
-공유 링크의 학기별 수강내역을 가져오는 독립 모듈이다. 공식 개설강좌 API와 과목 연결은 구현하지 않는다. 기존 `intake_app`의 저장 데이터나 UI를 변경하지 않는다.
+공유 링크의 학기별 수강내역을 가져오는 모듈이다. CLI는 수집 JSON을 저장한다. [입력 앱](../intake_app/README.md)에서는 수집 결과를 미리 보고 저장한 뒤 공식 개설강좌 DB와 대조할 수 있다.
 
 Python 3.10 이상과 PowerShell(`pwsh` 또는 `powershell`)이 필요하다. 추가 Python 패키지는 필요 없다. 현재 체크아웃한 저장소 루트(`AGENTS.md`가 있는 폴더)에서 실행한다.
 
@@ -18,6 +18,7 @@ python -B -m everytime_import 'https://everytime.kr/@공유식별자' --output '
 
 ## 요청과 수집
 
+- `https://everytime.kr/@공유식별자`와 `https://everytime.kr/app/@공유식별자`를 모두 지원한다.
 - `POST https://api.everytime.kr/find/timetable/table/friend`
 - `application/x-www-form-urlencoded`: `identifier=...&friendInfo=true`
 - PowerShell로 요청하고 Python 표준 XML 파서로 해석한다.
@@ -77,8 +78,7 @@ from everytime_import import collect, save_json
 
 result = collect('https://everytime.kr/@공유식별자')
 save_json(result, 'everytime_import/runtime/course_import.json')
-# result['course_attempts']를 이후 입력 확인 화면에 전달할 수 있다.
-# 현재 intake_app의 v1 문서와는 다른 독립 수집 형식이다.
+# 입력 앱의 가져오기 어댑터는 수집 행을 학생 입력 v2 형식으로 바꾼다.
 ```
 
 ## 테스트

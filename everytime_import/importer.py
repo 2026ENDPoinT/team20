@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from time import monotonic
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, uuid5
 import xml.etree.ElementTree as ET
@@ -32,11 +33,10 @@ def identifier_from_url(url):
                  and not parsed.query and not parsed.fragment)
     except ValueError as exc:
         raise ImportFailure('올바른 에브리타임 공유 링크가 아닙니다.') from exc
-    path = parsed.path.rstrip('/')
-    identifier = path[2:] if path.startswith('/@') else ''
-    if not valid or not IDENTIFIER.fullmatch(identifier):
-        raise ImportFailure('https://everytime.kr/@식별자 형식의 공유 링크가 필요합니다.')
-    return identifier
+    path = re.fullmatch(r'/(?:app/)?@([A-Za-z0-9_-]{1,100})', parsed.path.rstrip('/'))
+    if not valid or not path:
+        raise ImportFailure('에브리타임의 /@식별자 또는 /app/@식별자 형식의 공유 링크가 필요합니다.')
+    return path[1]
 
 
 def source_term(element):
@@ -86,6 +86,8 @@ def parse_table(xml, expected_identifier):
                    course_name=value('name'), professor=value('professor') or None,
                    completion_status='unconfirmed', user_confirmed=False, source='everytime',
                    source_timetable_id=expected_identifier, source_subject_id=source_id)
+        if source_id is None:
+            row['source_position'] = index
         if identity in seen:
             if seen[identity] != row:
                 raise ImportFailure('같은 원본 과목 ID의 내용이 충돌합니다.')
@@ -101,7 +103,7 @@ def parse_table(xml, expected_identifier):
                 references=references, warnings=warnings)
 
 
-def fetch_xml(identifier):
+def fetch_xml(identifier, *, timeout=40):
     """PowerShell is the tested transport; subprocess input is data, never shell code."""
     if not IDENTIFIER.fullmatch(identifier):
         raise ImportFailure('시간표 식별자가 잘못되었습니다.')
@@ -113,7 +115,7 @@ def fetch_xml(identifier):
             [executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
              str(Path(__file__).with_name('transport.ps1'))],
             input=json.dumps({'identifier': identifier}), capture_output=True,
-            encoding='utf-8', timeout=40,
+            encoding='utf-8', timeout=timeout,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         payload = json.loads(result.stdout.lstrip('\ufeff'))
     except subprocess.TimeoutExpired as exc:
@@ -129,7 +131,7 @@ def fetch_xml(identifier):
     return xml
 
 
-def collect(shared_url, *, fetcher=fetch_xml, max_tables=100):
+def collect(shared_url, *, fetcher=fetch_xml, max_tables=100, timeout=None):
     """Collect each reachable table once. Partial failures are explicit, not empty successes."""
     first = identifier_from_url(shared_url)
     if type(max_tables) is not int or not 1 <= max_tables <= 100:
@@ -137,11 +139,17 @@ def collect(shared_url, *, fetcher=fetch_xml, max_tables=100):
     queue, discovered = deque([first]), {first: None}
     courses, tables, failures, warnings = [], [], [], []
     requested = 0
+    deadline = monotonic() + timeout if timeout is not None else None
     while queue and requested < max_tables:
+        remaining = deadline - monotonic() if deadline is not None else None
+        if remaining is not None and remaining <= 0:
+            break
         identifier = queue.popleft()
         requested += 1
         try:
-            parsed = parse_table(fetcher(identifier), identifier)
+            xml = (fetch_xml(identifier, timeout=min(40, remaining))
+                   if remaining is not None and fetcher is fetch_xml else fetcher(identifier))
+            parsed = parse_table(xml, identifier)
             if discovered[identifier] and discovered[identifier] != parsed['term']:
                 raise ImportFailure('목록의 학기와 실제 시간표 학기가 다릅니다.')
             discovered[identifier] = parsed['term']
@@ -162,8 +170,10 @@ def collect(shared_url, *, fetcher=fetch_xml, max_tables=100):
                 if issue not in failures:
                     failures.append(issue)
     for identifier in queue:
+        timed_out = requested < max_tables
         failures.append(dict(identifier=identifier, term=discovered[identifier],
-                             code='table_limit', message='조회 개수 제한으로 미조회했습니다.'))
+                             code='time_limit' if timed_out else 'table_limit',
+                             message='전체 조회 시간이 초과됐습니다.' if timed_out else '조회 개수 제한으로 미조회했습니다.'))
     return dict(schema_version=1, kind='everytime_course_import',
                 imported_at=datetime.now(timezone.utc).isoformat(),
                 source=dict(provider='everytime', root_identifier=first),

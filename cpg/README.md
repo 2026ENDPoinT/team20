@@ -53,7 +53,7 @@ flowchart LR
 ## 근거와 현재 구현
 
 - [Notion CPG 기획 및 파이프라인](https://app.notion.com/p/2026-EndPoint-40f3f86cd5c380b5813ef06cc0fbcaae)에는 공통 학생 JSON 예시, 과목 추천, 시간표 플랜, 공개 시간표 조회 샘플이 있다. 서비스는 과목 추천 화면과 시간표 플랜 화면을 별도로 둔다.
-- [team20 상세 설계](<C:/Users/김재민/Desktop/team20/sources/course_planning_design.md>)와 [요건 검수 메모](<C:/Users/김재민/Desktop/team20/sources/review_notes.md>)를 규칙·매칭·검수의 출발점으로 사용한다. 현재 입력 앱은 `source=everytime`을 거부하며 해당 강좌코드·교수·원본 참조를 저장하지 않는다.
+- [상세 설계](../sources/course_planning_design.md)와 [요건 검수 메모](../sources/review_notes.md)를 규칙·매칭·검수의 출발점으로 사용한다. [로컬 입력 앱](../intake_app/README.md)에서 에타 미리보기·선택 저장과 공식 분반 대조를 사용할 수 있다.
 - [학교 개설과목 수집기](../../seoultech_class/README.md)와 2026-2 컴퓨터공학과 CSV 40행이 있고, [건물 거리](../../seoultech_class/classroom_dist/README.md)는 별도 데이터로 있다. 이 자료를 연결하는 CPG 적재 모듈은 새 작업이다.
 - [화면 프로토타입](../../endpoint-prototype.html)은 내장 예시 데이터로 동작하며 시간표 생성에 과목 선택을 요구한다. 과목 없이 생성하는 경로와 저장 과목 조건 추가는 개정 2의 구현 항목이다.
 
