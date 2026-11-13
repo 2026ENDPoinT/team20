@@ -102,7 +102,7 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(candidates['109114']['requirement_ids'], ['capstone_2'])
         self.assertLess(order.index('109078'), order.index('109180'))
         self.assertTrue(candidates['109180']['lower_grade'])
-        self.assertEqual(candidates['109004']['eligibility'], 'needs_review')
+        self.assertEqual(candidates['109004']['eligibility'], 'no_restriction_recorded')
         self.assertEqual(candidates['100057']['group'], 'required_general')
         capstone_1 = next(rule for rule in result['requirements'] if rule['id'] == 'capstone_1')
         self.assertEqual(capstone_1['recommendation_group'], 'future_major_required')
@@ -122,7 +122,9 @@ class DomainTests(unittest.TestCase):
         physics = {row['section_code']: row for row in courses['101068']['sections']}
         self.assertNotIn('11003', physics)
         self.assertEqual(physics['11009']['eligibility'], 'no_restriction_recorded')
-        self.assertEqual(physics['11001']['eligibility'], 'needs_review')
+        self.assertEqual(physics['11001']['eligibility'], 'no_restriction_recorded')
+        self.assertIsNone(physics['11001']['eligibility_reason'])
+        self.assertEqual(physics['11002']['eligibility'], 'needs_review')
         self.assertNotIn('100453', courses)
 
         request = dict(min_credits=2, max_credits=2)

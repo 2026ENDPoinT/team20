@@ -26,7 +26,7 @@ NEUTRAL_DETAILS = re.compile(
     r'택1\s*,\s*(?:제[1-5]영역|공통필수 (?:실용영어의사소통|인성영역|글쓰기논리)|2과목 그룹\d+)'
 )
 OPEN_NOTES = {
-    '', '절대평가', '수강대상자 구분 없음(영어강의)',
+    '절대평가', '수강대상자 구분 없음(영어강의)',
     '수강제한 없음 / 강좌 당 28명 제한 / 수강신청 후 분반',
     '수강제한 없음 / 수강신청 후 수강 학생수에 맞춰 분반 / 공동평가',
 }
@@ -43,6 +43,8 @@ def eligibility(offering, term):
 
     original_note = (offering.get('note') or '').strip()
     note = clean(original_note)
+    if offering['day_night'] == '주간' and not note:
+        return 'no_restriction_recorded', None
     details = clean(offering.get('details'))
     restriction = offering['school_flags'].get('other_department_restricted')
     if any(word in note for word in ('우선', '정정', '제한 해제')):
