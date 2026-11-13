@@ -266,7 +266,9 @@ dialog[open],.step-panel:not([hidden]),.result-panel[open] .result-body,.results
 @media(min-width:801px) { .schedule-preview { position:sticky; top:80px; } }
 #schedule-status, #schedule-preview-summary { margin:8px 0 12px; color:var(--muted); font-size:14px }
 #schedule-status:empty, #schedule-preview-summary:empty { display:none }
-.schedule-candidate-header { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px }
+.schedule-candidate-header, .schedule-preview-header { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; align-items:center }
+.schedule-candidate-header { margin-bottom:12px }
+.schedule-preview-header h2 { margin:0 }
 #schedule-results { max-height: min(56vh, 490px); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:4px 6px 4px 4px }
 .schedule-candidate { display:flex; align-items:center; text-align:left; width:100%; min-height:56px; padding:8px 10px; gap:10px; border:1px solid var(--line); border-left:3px solid var(--line); background:var(--surface); margin-bottom:6px }
 .schedule-candidate small { display:block; color:var(--muted) }
@@ -297,6 +299,81 @@ dialog[open],.step-panel:not([hidden]),.result-panel[open] .result-body,.results
 .schedule-color-3 { --slot-bg:#efdee6; --slot-edge:#805066 }
 .schedule-color-4 { --slot-bg:#f7e6e2; --slot-edge:#985b50 }
 .schedule-color-5 { --slot-bg:#eae9df; --slot-edge:#686550 }
+#registration-practice {
+  --practice-ivory:#fff4e6;
+  --practice-muted:#cdb9c8;
+  --practice-line:#57404f;
+  --practice-coral:#e88368;
+  --practice-red:#ff626b;
+  --practice-gold:#ffdc86;
+  width:min(760px,calc(100% - 24px)); animation:none;
+  color-scheme:dark; background:#21171f; color:var(--practice-ivory); border-color:var(--practice-line);
+}
+#registration-practice[open] { display:flex; flex-direction:column; }
+#registration-practice::backdrop { background:#1b111ada; }
+#registration-practice .dialog-header {
+  position:static; flex:none; padding:12px clamp(12px,3vw,22px);
+  background:#2e202b; border-color:var(--practice-line);
+}
+#registration-practice-summary { margin:2px 0 0; color:var(--practice-muted); font-size:13px; }
+.registration-practice-record { margin:0 0 0 auto; color:var(--practice-muted); font-size:13px; white-space:nowrap; }
+.registration-practice-record strong { color:var(--practice-ivory); font-variant-numeric:tabular-nums; }
+.registration-practice-stage { display:grid; isolation:isolate; align-items:center; padding:clamp(10px,2.5vw,20px); }
+#registration-practice-calendar {
+  grid-area:1/1; min-width:0; height:clamp(220px,calc(91dvh - 118px),470px); margin:0;
+  background:#291c26; border-color:var(--practice-line); overscroll-behavior:contain;
+}
+#registration-practice-calendar .schedule-grid {
+  --paper:#31232e; --line:#463341; --ink:#bba7b5; --muted:#ad98a7;
+  --slot-bg:#382735; --slot-edge:#89677e;
+  min-width:420px;
+}
+#registration-practice-calendar :is(.schedule-slot,.schedule-class-block) {
+  background:var(--slot-bg); color:var(--ink);
+}
+#registration-practice-calendar .schedule-color-1 { --slot-bg:#3e2b30; --slot-edge:#aa776b; }
+#registration-practice-calendar .schedule-color-2 { --slot-bg:#362c3e; --slot-edge:#9479a6; }
+#registration-practice-calendar .schedule-color-3 { --slot-bg:#422a3c; --slot-edge:#ad7797; }
+#registration-practice-calendar .schedule-color-4 { --slot-bg:#3c3030; --slot-edge:#a68979; }
+#registration-practice-calendar .schedule-color-5 { --slot-bg:#30323c; --slot-edge:#8290aa; }
+#registration-practice-calendar .schedule-half { height:25px; }
+#registration-practice-calendar:focus-visible { outline-color:var(--practice-ivory); }
+.registration-practice-controls {
+  grid-area:1/1; z-index:1; justify-self:center; width:min(400px,calc(100% - 24px));
+  padding:clamp(12px,3vw,22px); text-align:center;
+  background:linear-gradient(150deg,#432a3e,#2c1e29 72%);
+  border:1px solid #765568; border-top:3px solid var(--practice-coral); box-shadow:0 16px 40px #100911b3;
+}
+.registration-practice-controls p { margin:0; }
+#registration-practice-instruction { color:var(--practice-muted); font-size:13px; }
+#registration-practice-clock {
+  margin:4px 0 12px; color:var(--practice-ivory); font-size:clamp(17px,5.5vw,36px); font-weight:800;
+  line-height:1.3; font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+#registration-practice-clock.is-open { color:var(--practice-red); }
+#registration-practice-clock small { font-size:.68em; }
+.registration-practice-actions .button { width:100%; min-height:44px; }
+#registration-practice .button:focus-visible { outline-color:var(--practice-ivory); }
+#registration-practice .button.primary { background:var(--practice-coral); color:#241821; border-color:var(--practice-coral); }
+#registration-practice .button.primary:hover { background:#ffa58e; }
+#registration-practice .button.secondary { background:#3d2b38; color:var(--practice-ivory); border-color:#765568; }
+#registration-practice .button.secondary:hover { background:#52384a; }
+#registration-practice-result {
+  min-height:72px; margin-top:8px; padding:6px; display:grid; align-content:center;
+  border:1px solid transparent; color:var(--practice-ivory); font-size:13px; font-weight:700; line-height:1.4;
+}
+#registration-practice-result.is-excellent { background:#453126; border-color:#a77b41; color:var(--practice-gold); }
+#registration-practice-score { display:block; font-size:clamp(23px,6vw,32px); line-height:1.15; font-variant-numeric:tabular-nums; }
+#registration-practice-score::before, #registration-practice-score::after {
+  content:""; display:inline-block; width:12px; height:10px; margin-inline:10px; vertical-align:middle;
+  border-block:1px solid currentColor; transform:rotate(-32deg);
+}
+#registration-practice-score::after { transform:rotate(32deg); }
+@media(max-width:400px) {
+  #registration-practice .dialog-header { column-gap:6px; }
+  #registration-practice-title { font-size:17px; }
+  .registration-practice-record { font-size:12px; }
+}
 @media(max-width:800px) { .schedule-workspace { grid-template-columns:minmax(0,1fr) } #schedule-results { max-height:260px } }
 
 /* Design preview */

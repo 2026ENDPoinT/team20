@@ -1299,6 +1299,7 @@ $('#schedule-days').innerHTML = scheduleDays.map(day =>
 ).join('');
 
 let scheduleCandidates = [];
+let selectedSchedule = null;
 
 const scheduleSectionList = $('#schedule-section-list');
 function previewScheduleSection(row) {
@@ -1477,6 +1478,8 @@ function renderScheduleAnalytics(plan) {
 function showSchedule(index) {
   const plan = scheduleCandidates[index];
   if (!plan) return;
+  selectedSchedule = plan;
+  $('#start-registration-practice').hidden = false;
   for (const button of document.querySelectorAll('[data-schedule-index]')) {
     button.setAttribute('aria-pressed', String(Number(button.dataset.scheduleIndex) === index));
   }
@@ -1495,6 +1498,133 @@ function showSchedule(index) {
     </tr>`).join('')}</tbody></table>`;
   $('#schedule-offerings').hidden = false;
 }
+
+const practiceDialog = $('#registration-practice');
+const practiceStart = $('#start-registration-practice');
+const practiceApply = $('#registration-practice-apply');
+const practiceRetry = $('#registration-practice-retry');
+const practiceClock = $('#registration-practice-clock');
+const practiceClockSeconds = practiceClock.querySelector('span');
+const practiceClockMillis = practiceClock.querySelector('small');
+const practiceResult = $('#registration-practice-result');
+const practiceScore = $('#registration-practice-score');
+const practiceFeedback = $('#registration-practice-feedback');
+const practiceBestKey = 'registration-practice-best-ms';
+const practiceOpeningTime = 10 * 60 * 60 * 1000;
+const practiceExcellentMs = 50;
+let practiceDeadline = null;
+let practiceFrame = null;
+let practiceBest = null;
+
+function clearSelectedSchedule() {
+  selectedSchedule = null;
+  practiceStart.hidden = true;
+  if (practiceDialog.open) practiceDialog.close();
+}
+
+function syncPracticeBest() {
+  try {
+    const stored = localStorage.getItem(practiceBestKey);
+    const value = Number(stored);
+    if (stored !== null && stored.trim() && Number.isFinite(value) && value >= 0) {
+      practiceBest = Math.min(practiceBest ?? Infinity, value);
+    }
+  } catch { /* Keep the best time in memory if storage is unavailable. */ }
+  $('#registration-practice-best').textContent = practiceBest === null ? '—' : `${(practiceBest / 1000).toFixed(3)}초`;
+}
+
+function showPracticeTime(offset) {
+  const time = new Date(Math.floor(practiceOpeningTime + offset)).toISOString();
+  const seconds = `${time.slice(11, 13)}시 ${time.slice(14, 16)}분 ${time.slice(17, 19)}초`;
+  if (practiceClockSeconds.textContent !== seconds) practiceClockSeconds.textContent = seconds;
+  practiceClockMillis.textContent = time.slice(20, 23);
+  practiceClock.classList.toggle('is-open', offset >= 0);
+}
+
+function tickPracticeClock() {
+  if (practiceDeadline === null || !practiceDialog.open) return;
+  showPracticeTime(performance.now() - practiceDeadline);
+  practiceFrame = requestAnimationFrame(tickPracticeClock);
+}
+
+function startPracticeRound() {
+  syncPracticeBest();
+  practiceScore.hidden = true;
+  practiceScore.textContent = '';
+  practiceFeedback.textContent = '';
+  practiceResult.classList.remove('is-excellent');
+  practiceRetry.hidden = true;
+  practiceApply.hidden = false;
+  practiceApply.disabled = false;
+  practiceApply.focus({preventScroll:true});
+  const wait = 2000 + Math.floor(Math.random() * 3001);
+  practiceDeadline = performance.now() + wait;
+  showPracticeTime(-wait);
+  practiceFrame = requestAnimationFrame(tickPracticeClock);
+}
+
+function stopPracticeRound() {
+  practiceDeadline = null;
+  cancelAnimationFrame(practiceFrame);
+  practiceFrame = null;
+}
+
+function finishPracticeRound(message, score = '') {
+  stopPracticeRound();
+  practiceResult.classList.toggle('is-excellent', Boolean(score));
+  practiceScore.textContent = score;
+  practiceScore.hidden = !score;
+  practiceFeedback.textContent = message;
+  practiceApply.disabled = true;
+  practiceApply.hidden = true;
+  practiceRetry.hidden = false;
+  practiceRetry.focus({preventScroll:true});
+}
+
+practiceStart.addEventListener('click', () => {
+  if (!selectedSchedule || practiceDialog.open) return;
+  const {offerings, credits} = selectedSchedule;
+  $('#registration-practice-summary').textContent = `${offerings.length}과목 · 총 ${credits}학점`;
+  const calendar = $('#registration-practice-calendar');
+  calendar.replaceChildren($('#schedule-calendar').firstElementChild.cloneNode(true));
+  practiceDialog.showModal();
+  calendar.scrollTo(0, 0);
+  startPracticeRound();
+});
+
+practiceApply.addEventListener('click', event => {
+  if (practiceDeadline === null || !practiceDialog.open || document.hidden) return;
+  const offset = event.timeStamp - practiceDeadline;
+  showPracticeTime(offset);
+  const seconds = (Math.abs(offset) / 1000).toFixed(3);
+  const excellent = offset >= 0 && offset <= practiceExcellentMs;
+  const message = offset < 0 ? `${seconds}초 일찍 눌렀어요.` : `시작 후 ${seconds}초에 눌렀어요.`;
+  if (offset >= 0) syncPracticeBest();
+  const newBest = offset >= 0 && (practiceBest === null || offset < practiceBest);
+  if (newBest) {
+    practiceBest = offset;
+    try { localStorage.setItem(practiceBestKey, String(offset)); }
+    catch { /* Keep the best time in memory if storage is unavailable. */ }
+    syncPracticeBest();
+  }
+  const feedback = excellent ? '정각을 잡았어요!' : message;
+  finishPracticeRound(newBest ? `${feedback} 신기록` : feedback, excellent ? `${seconds}초` : '');
+});
+
+practiceRetry.addEventListener('click', () => {
+  if (practiceDialog.open && practiceDeadline === null) startPracticeRound();
+});
+practiceDialog.addEventListener('keydown', event => {
+  if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
+});
+practiceDialog.addEventListener('close', () => {
+  if (!practiceDialog.open) stopPracticeRound();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && practiceDialog.open && practiceDeadline !== null) {
+    finishPracticeRound('다른 탭으로 이동해 이번 연습을 취소했어요.');
+  }
+});
 
 function renderSchedules(result) {
   scheduleCandidates = result.candidates;
@@ -1533,6 +1663,7 @@ $('#edit-schedule-conditions').addEventListener('click', () => {
 });
 
 function showScheduleConditions() {
+  clearSelectedSchedule();
   renderScheduleAnalytics(null);
   $('#schedule-candidates').hidden = true;
   $('#schedule-form').hidden = false;
@@ -1644,6 +1775,7 @@ $('#schedule-form').addEventListener('submit', async event => {
   if (button.disabled) return;
   closeScheduleSections(false);
   button.disabled = true;
+  clearSelectedSchedule();
   $('#schedule-results').replaceChildren();
   renderScheduleAnalytics(null);
   $('#schedule-offerings').hidden = true;
