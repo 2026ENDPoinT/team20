@@ -41,7 +41,7 @@
         <div class="form-grid">
           <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
           <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
-          <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">수업 요일 수 최소</option><option value="least_gap">수업 사이 빈 시간 최소</option></select></label>
+          <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">동률이면 수업 요일 적게</option><option value="least_gap">동률이면 수업 사이 빈 시간 적게</option></select></label>
         </div>
         <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
           <div class="tags" id="schedule-days"></div>

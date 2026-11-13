@@ -729,6 +729,14 @@ function scheduleGapLabel(plan) {
   return plan.gap_periods ? `수업 사이 빈 시간 합계 ${plan.gap_periods}교시` : '수업 사이 빈 시간 없음';
 }
 
+function scheduleCourseMix(plan) {
+  return "전공 " + plan.major_credits + "학점 · 교양 " + plan.general_credits + "학점";
+}
+
+function scheduleSpacing(plan) {
+  return plan.adjacent_sessions ? "연강 " + plan.adjacent_sessions + "회" : "연강 없음";
+}
+
 function renderCalendar(plan = null) {
   const entries = (plan?.offerings ?? []).flatMap((offering, color) =>
     offering.meetings.map(meeting => ({...meeting, offering, color: color % 6})));
@@ -750,7 +758,7 @@ function renderCalendar(plan = null) {
         const {offering} = meeting;
         cells.push(`<td class="schedule-slot schedule-color-${meeting.color}" rowspan="${meeting.end - meeting.start}">
           <div class="schedule-class-block" title="${esc(offering.course_name)} · ${esc(offering.schedule)}">
-          <strong>${esc(offering.course_name)}</strong><small>${esc(offering.section_code)}</small></div></td>`);
+          <strong>${esc(offering.course_name)}</strong><small>${esc(offering.category)} · ${esc(offering.section_code)}</small></div></td>`);
       }
     }
     rows.push(`<tr class="schedule-half${tick % 2 ? ' period-end' : ''}">${cells.join('')}</tr>`);
@@ -766,7 +774,7 @@ function showSchedule(index) {
   for (const button of document.querySelectorAll('[data-schedule-index]')) {
     button.setAttribute('aria-pressed', String(Number(button.dataset.scheduleIndex) === index));
   }
-  $('#schedule-preview-summary').textContent = `${index + 1}위 · ${plan.credits}학점 · 수업 요일 ${scheduleClassDays(plan).join("·")} (${plan.days}일) · ${scheduleGapLabel(plan)}${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
+  $('#schedule-preview-summary').textContent = `${index + 1}위 · ${plan.credits}학점 · 수업 요일 ${scheduleClassDays(plan).join("·")} (${plan.days}일) · ${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)} · ${scheduleGapLabel(plan)}${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
   renderCalendar(plan);
   const locked = new Set($('#schedule-locks').value.split(/[\s,]+/).filter(Boolean));
   $('#schedule-offering-table').innerHTML = `<table><thead><tr><th>과목·분반</th><th>교시</th><th>강의실</th><th>학점</th><th>수강 자격</th></tr></thead>
@@ -794,7 +802,7 @@ function renderSchedules(result) {
     class="schedule-candidate${index < 3 ? ' rank-' + (index + 1) : ''}" data-schedule-index="${index}" aria-pressed="false">
     <strong class="schedule-rank">${index + 1}위</strong>
     <span><strong>${plan.credits}학점 · 수업 ${scheduleClassDays(plan).join("·")} (${plan.days}일)</strong>
-      <small>${scheduleGapLabel(plan)}${plan.provisional ? ' · 잠정' : ''}</small></span>
+      <small>${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)}${plan.provisional ? ' · 잠정' : ''}</small></span>
   </button>`).join('');
   list.scrollTop = 0;
   showSchedule(0);

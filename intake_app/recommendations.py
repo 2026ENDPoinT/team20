@@ -299,6 +299,8 @@ def recommend(database, document, *, schedule_context=False):
         lower_grade = is_major_elective and level is not None and level < grade
         if lower_grade:
             reasons.append('현재 학년보다 낮은 학년의 전공선택')
+        elif is_major_elective and level is not None and level > grade:
+            reasons.append(f'{level}학년 편성 전공선택 · 시간표에서 직접 지정할 때 포함')
         course_tags = classify(lead, tags, by_course)
         matched_tags = selected & course_tags
         interest = len(matched_tags)
@@ -325,7 +327,15 @@ def recommend(database, document, *, schedule_context=False):
                 partial=bool(credit_reviews) or any(row['status'] == 'needs_review' for row in results),
                 candidates=[item for _, item in items])
     if schedule_context:
-        pool = [dict(section, credit_bucket=bucket(section, general_codes))
-                for sections in by_code.values() for section in sections]
+        core_areas = {id: codes(rules[id]) for id in ('core_1', 'core_2', 'core_3') if id in rules}
+        core_areas.update({f"core_{area['area']}": codes(area) for area in data.get('elective_core_areas', ())})
+        area_by_code = {code: area for area, members in core_areas.items() for code in members}
+        occupied_areas = {area for area, members in core_areas.items()
+                          if members & blocked or statuses.get(area) == 'met'}
+        pool = [
+            dict(section, credit_bucket=bucket(section, general_codes), recommended_grade=grades.get(code),
+                 core_area=area_by_code.get(code), core_area_occupied=area_by_code.get(code) in occupied_areas)
+            for code, sections in by_code.items() for section in sections
+        ]
         return response, pool, alternative_by_code, deficits
     return response
