@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .domain import ensure
 from .interest_tags import OTHER, classify, load_tags
-from .offerings import normalized_name, recommendation_data, school_term
+from .offerings import everytime_ratings, normalized_name, recommendation_data, school_term
 
 DATA = Path(__file__).resolve().parents[1] / 'data' / 'graduation_requirements'
 CS = '20030505'
@@ -178,7 +178,7 @@ def eligibility(offering):
     return 'needs_review'
 
 
-def recommend(database, document, *, schedule_context=False):
+def recommend(database, document, *, schedule_context=False, ratings_db=None):
     student = document['student']
     if student.get('program_type') is None:
         student = dict(student, program_type='standard_single_major_day')
@@ -195,6 +195,7 @@ def recommend(database, document, *, schedule_context=False):
     alternatives = json.loads((DATA.parent / 'course_alternatives.json').read_text(encoding='utf-8'))
     target, matches, offerings = recommendation_data(database, document)
     ensure(target is not None, '추천 학기의 개설강좌 자료가 없습니다.')
+    ratings = everytime_ratings(ratings_db, target)
     target_year = target['term'][:4]
     target_term = student['target_term'] or f"{target_year}-{target['term'][-1]}"
     ensure(int(target_year) >= year, '입학연도 이후의 개설강좌 자료가 없습니다.')
@@ -254,7 +255,8 @@ def recommend(database, document, *, schedule_context=False):
             continue
         state = eligibility(offering)
         if state != 'excluded':
-            by_code[code].append(dict(offering, eligibility=state))
+            by_code[code].append(dict(offering, eligibility=state,
+                                      everytime_rating=ratings.get(offering['offering_id'])))
     tags, by_label, by_course = load_tags()
     interests = {normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)}
     selected = set().union(*(by_label.get(tag, set()) for tag in interests))
@@ -316,7 +318,8 @@ def recommend(database, document, *, schedule_context=False):
                          interest_score=interest, interest_tags=[tag['id'] for tag in tags if tag['id'] in course_tags]
                                        or ([OTHER] if OTHER in course_tags else []),
                          eligibility='needs_review' if uncertain else 'no_restriction_recorded',
-                         sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits','eligibility')}
+                         sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits',
+                                                               'eligibility','everytime_rating')}
                                    for row in sections])
         if code in alternative_by_code:
             candidate['alternative_group'] = alternative_by_code[code]

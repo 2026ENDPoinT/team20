@@ -110,7 +110,7 @@ def request_codes(value, field):
     return set(entries)
 
 
-def generate(database, document, request, *, max_nodes=60000, seconds=2):
+def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None):
     student = document["student"]
     lower = request.get("min_credits")
     upper = request.get("max_credits")
@@ -134,7 +134,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2):
     ensure(isinstance(sort, str) and sort in SORTS, "정렬 기준을 확인해주세요.")
 
     document = dict(document, student=dict(student, target_term=None, recognition_notes=""))
-    result, pool, alternatives, deficits = recommend(database, document, schedule_context=True)
+    result, pool, alternatives, deficits = recommend(database, document, schedule_context=True, ratings_db=ratings_db)
     candidates = {row["course_code"]: row for row in result["candidates"]}
     rules = {rule["id"]: rule for rule in result["requirements"]}
     buckets = ("major", "general")
@@ -176,7 +176,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2):
                  section_code=section["section_code"], professor=section["professor"], credits=credits,
                  schedule=section["schedule"], room=section["room"], meetings=meetings,
                  category=section["category"], eligibility=section["eligibility"],
-                 recommended_grade=level, core_area=section.get("core_area")),
+                 recommended_grade=level, core_area=section.get("core_area"),
+                 everytime_rating=section["everytime_rating"]),
             int(Decimal(str(credits)) * 100), mask,
             frozenset(r for r in rule_ids if rules[r].get("recommendation_group") == "current_major_required"),
             frozenset(r for r in rule_ids if rules[r].get("recommendation_group") == "required_general"),

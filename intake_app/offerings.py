@@ -69,6 +69,18 @@ def recommendation_data(database, document):
         return target, matches, offerings
 
 
+def everytime_ratings(database, snapshot):
+    if database is None or not Path(database).is_file():
+        return {}
+    uri = Path(database).resolve().as_uri() + '?mode=ro'
+    with closing(sqlite3.connect(uri, uri=True)) as db:
+        return {offering_id: dict(status=status, score=rating)
+                for offering_id, status, rating in db.execute('''
+                    SELECT offering_id, status, rating FROM everytime_ratings
+                    WHERE term = ? AND official_snapshot_id = ?
+                ''', (snapshot['term'], snapshot['snapshot_id']))}
+
+
 def compare_offerings(database, document, *, require_completion=True):
     with closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         db.row_factory = sqlite3.Row

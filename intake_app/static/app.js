@@ -519,6 +519,12 @@ function recommendationEntries(courses) {
   return Array.from(entries.values());
 }
 
+function everytimeRatingLabel(rating) {
+  if (rating?.status === 'rated') return `★ ${rating.score.toFixed(2)}`;
+  if (rating?.status === 'unrated') return '미평가';
+  return '자료 없음';
+}
+
 function recommendationTable(entries) {
   return `<div class="table-wrap"><table><thead><tr><th>과목</th><th>편성 학년</th><th>추천 이유</th><th>분반</th><th>담기</th></tr></thead>
     ${entries.map(courses => `<tbody>
@@ -527,7 +533,7 @@ function recommendationTable(entries) {
       <td>${course.recommended_grade ?? '—'}</td><td>${course.reasons.map(reason => reason.startsWith('관심 주제 일치')
         ? `<span class="reason-highlight">${esc(reason)}</span>` : esc(reason)).join('<br>')}</td>
       <td><details><summary>${course.sections.length}개${course.eligibility==='needs_review'?' · 수강제한 확인 필요':''}</summary>
-      ${course.sections.map(section => `<small>${esc(section.section_code)} · ${esc(section.professor || '교수 미정')} · ${esc(section.credits ?? '—')}학점${section.eligibility==='needs_review'?' · 제한 확인 필요':''}</small>`).join('')}
+      ${course.sections.map(section => `<small>${esc(section.section_code)} · ${esc(section.professor || '교수 미정')} · ${esc(section.credits ?? '—')}학점 · 에타 ${esc(everytimeRatingLabel(section.everytime_rating))}${section.eligibility==='needs_review'?' · 제한 확인 필요':''}</small>`).join('')}
       </details></td><td><button type="button" class="button secondary basket-add" data-basket-add="${esc(course.course_code)}" data-course-name="${esc(course.course_name)}">+</button></td></tr>`).join('')}
     </tbody>`).join('')}
   </table></div>`;
@@ -777,12 +783,13 @@ function showSchedule(index) {
   $('#schedule-preview-summary').textContent = `${index + 1}위 · ${plan.credits}학점 · 수업 요일 ${scheduleClassDays(plan).join("·")} (${plan.days}일) · ${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)} · ${scheduleGapLabel(plan)}${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
   renderCalendar(plan);
   const locked = new Set($('#schedule-locks').value.split(/[\s,]+/).filter(Boolean));
-  $('#schedule-offering-table').innerHTML = `<table><thead><tr><th>과목·분반</th><th>교시</th><th>강의실</th><th>학점</th><th>수강 자격</th></tr></thead>
+  $('#schedule-offering-table').innerHTML = `<table><thead><tr><th>과목·분반</th><th>교시</th><th>강의실</th><th>학점</th><th>에타 별점</th><th>수강 자격</th></tr></thead>
     <tbody>${plan.offerings.map(row => `<tr>
       <td>${esc(row.course_name)}<small>${esc(row.course_code)}-${esc(row.section_code)}</small>
         <button type="button" class="button subtle" data-lock-offering="${esc(row.offering_id)}"${locked.has(row.offering_id) ? ' disabled' : ''}>${locked.has(row.offering_id) ? '고정됨' : '분반 고정'}</button></td>
       <td>${esc(row.schedule)}</td><td>${esc(row.room || '미정')}</td>
-      <td>${esc(row.credits)}</td><td>${row.eligibility === 'needs_review' ? '수강 자격 확인' : '제한 기록 없음'}</td>
+      <td>${esc(row.credits)}</td><td>${esc(everytimeRatingLabel(row.everytime_rating))}</td>
+      <td>${row.eligibility === 'needs_review' ? '수강 자격 확인' : '제한 기록 없음'}</td>
     </tr>`).join('')}</tbody></table>`;
   $('#schedule-offerings').hidden = false;
 }

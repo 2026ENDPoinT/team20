@@ -22,15 +22,18 @@ from .store import Store, ConflictError
 BASE = Path(__file__).resolve().parent
 MAX_BODY = 12 * 1024 * 1024
 OFFICIAL_DB = BASE.parent / 'db' / 'courses.sqlite3'
+RATINGS_DB = BASE.parent / 'db' / 'everytime_ratings.sqlite3'
 EMPTY_DOCUMENT = {'student': {}, 'course_attempts': []}
 
 class Application(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, database, official_db=OFFICIAL_DB, *, collector=collect):
-        if Path(database).resolve() == Path(official_db).resolve():
-            raise ValueError('학생 입력과 공식 강좌에 서로 다른 DB 파일을 지정해주세요.')
+    def __init__(self, address, database, official_db=OFFICIAL_DB, *, collector=collect, ratings_db=RATINGS_DB):
+        paths = [Path(path).resolve() for path in (database, official_db, ratings_db) if path is not None]
+        if len(set(paths)) != len(paths):
+            raise ValueError('학생 입력, 공식 강좌, 에브리타임 별점에 서로 다른 DB 파일을 지정해주세요.')
         self.store = Store(database)
         self.official_db = official_db
+        self.ratings_db = ratings_db
         self.collector = collector
         self.import_lock = Lock()
         self.previews = {}
@@ -112,7 +115,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/schedules':
                 saved = self.load_version(version)
                 ensure(saved['document'] is not None, '내 정보에서 학생 정보를 먼저 저장해주세요.')
-                result = generate(self.server.official_db, validate_document(saved['document']), value)
+                result = generate(self.server.official_db, validate_document(saved['document']), value,
+                                  ratings_db=self.server.ratings_db)
                 self.load_version(version)
                 return self.respond(200, dict(result, input_revision=version))
             if path == '/api/recommendations':
@@ -121,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
                 document = validate_document(saved['document'])
                 if value.get('automatic_term') is True:
                     document['student'].update(target_term=None, recognition_notes='')
-                result = recommend(self.server.official_db, document)
+                result = recommend(self.server.official_db, document, ratings_db=self.server.ratings_db)
                 self.load_version(version)
                 return self.respond(200, dict(result, input_revision=version))
             final = value.get('reviewed', False)
@@ -220,8 +224,9 @@ def main():
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--db', type=Path, default=BASE / 'runtime' / 'student_inputs.sqlite')
     parser.add_argument('--official-db', type=Path, default=OFFICIAL_DB)
+    parser.add_argument('--ratings-db', type=Path, default=RATINGS_DB)
     args = parser.parse_args()
-    server = Application(('127.0.0.1', args.port), args.db, args.official_db)
+    server = Application(('127.0.0.1', args.port), args.db, args.official_db, ratings_db=args.ratings_db)
     print(f'Local: http://127.0.0.1:{server.server_port}', flush=True)
     try:
         server.serve_forever()
