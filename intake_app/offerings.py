@@ -81,6 +81,11 @@ def everytime_ratings(database, snapshot):
                 ''', (snapshot['term'], snapshot['snapshot_id']))}
 
 
+def rating_score(section):
+    rating = section.get('everytime_rating')
+    return rating['score'] if rating and rating['status'] == 'rated' else None
+
+
 def compare_offerings(database, document, *, require_completion=True):
     with closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         db.row_factory = sqlite3.Row

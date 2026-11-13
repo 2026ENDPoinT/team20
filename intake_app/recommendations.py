@@ -7,7 +7,7 @@ from pathlib import Path
 from .domain import ensure
 from .eligibility import eligibility
 from .interest_tags import OTHER, classify, load_tags
-from .offerings import everytime_ratings, normalized_name, recommendation_data, school_term
+from .offerings import everytime_ratings, normalized_name, rating_score, recommendation_data, school_term
 
 DATA = Path(__file__).resolve().parents[1] / 'data' / 'graduation_requirements'
 CS = '20030505'
@@ -255,10 +255,16 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
     interests = {normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)}
     selected = set().union(*(by_label.get(tag, set()) for tag in interests))
     items = []
+    interest_by_code = {}
     for code, sections in by_code.items():
-        sections.sort(key=lambda row: (row['eligibility'] == 'needs_review', row['section_code']))
+        sections.sort(key=lambda row: (row['eligibility'] == 'needs_review',
+                                       -(rating_score(row) or 0), row['section_code']))
         lead = sections[0]
         kind = bucket(lead, general_codes)
+        course_tags = classify(lead, tags, by_course)
+        matched_tags = selected & course_tags
+        interest = len(matched_tags)
+        interest_by_code[code] = interest
         needed = [id for id, rule in rules.items() if code in codes(rule) and statuses[id] != 'met']
         level = grades.get(code)
         if needed:
@@ -297,9 +303,6 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
             reasons.append('현재 학년보다 낮은 학년의 전공선택')
         elif is_major_elective and level is not None and level > grade:
             reasons.append(f'{level}학년 편성 전공선택 · 시간표에서 직접 지정할 때 포함')
-        course_tags = classify(lead, tags, by_course)
-        matched_tags = selected & course_tags
-        interest = len(matched_tags)
         if matched_tags:
             labels = [tag['label'] for tag in tags if tag['id'] in matched_tags]
             reasons.append('관심 주제 일치 · ' + ', '.join(labels))
@@ -318,7 +321,8 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                                    for row in sections])
         if code in alternative_by_code:
             candidate['alternative_group'] = alternative_by_code[code]
-        items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest, code), candidate))
+        items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest,
+                       -(rating_score(lead) or 0), code), candidate))
     items.sort(key=lambda item: item[0])
     response = dict(kind='course_recommendations', schema_version=2, target_term=student['target_term'],
                 snapshot=target, requirements=results, credit_reviews=credit_reviews,
@@ -332,7 +336,8 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                           if members & blocked or statuses.get(area) == 'met'}
         pool = [
             dict(section, credit_bucket=bucket(section, general_codes), recommended_grade=grades.get(code),
-                 core_area=area_by_code.get(code), core_area_occupied=area_by_code.get(code) in occupied_areas)
+                 core_area=area_by_code.get(code), core_area_occupied=area_by_code.get(code) in occupied_areas,
+                 interest_score=interest_by_code[code])
             for code, sections in by_code.items() for section in sections
         ]
         return response, pool, alternative_by_code, deficits, restricted_sections

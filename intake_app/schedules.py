@@ -11,12 +11,14 @@ from time import monotonic
 from crawl_module.classroom_dist.classroom_dist import DEFAULT_DB as DISTANCE_DB, building_names, lookup_key
 
 from .domain import ensure
+from .offerings import rating_score
 from .recommendations import recommend
 
 DAYS = "월화수목금토일"
 BLOCK = re.compile(r"([월화수목금토일])\(([^)]+)\)")
 RANGE = re.compile(r"(\d{1,2})([AB])?(?:\s*[~～-]\s*(\d{1,2})([AB])?)?")
 MAX_CANDIDATES = 15
+LATE_PERIOD_START = 11
 SORTS = {"recommended", "fewest_days", "least_gap"}
 
 
@@ -59,6 +61,7 @@ class Option:
     bucket: str
     uncertain: bool
     interest: int
+    rating: float | None
     building: str | None
     core_area: str | None
 
@@ -146,6 +149,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     blocked = request.get("blocked_days", [])
     ensure(isinstance(blocked, list) and all(isinstance(day, str) and day in tuple(DAYS) for day in blocked),
            "제외할 요일을 확인해주세요.")
+    allow_late_classes = request.get("allow_late_classes", False)
+    ensure(type(allow_late_classes) is bool, "늦은 수업 포함 설정을 확인해주세요.")
     sort = request.get("sort", "recommended")
     ensure(isinstance(sort, str) and sort in SORTS, "정렬 기준을 확인해주세요.")
 
@@ -164,6 +169,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     aliases, distances = building_data()
     options = defaultdict(list)
     unknown_times = set()
+    late_sections = {}
+    late_courses = set()
     for section in pool:
         code = section["course_code"]
         candidate = candidates.get(code, {})
@@ -183,6 +190,10 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             continue
         if any(m["day"] in blocked for m in meetings):
             continue
+        if not allow_late_classes and any(m["end"] > 2 * LATE_PERIOD_START for m in meetings):
+            late_sections[section["offering_id"]] = section
+            late_courses.add(code)
+            continue
         mask = 0
         for meeting in meetings:
             offset = DAYS.index(meeting["day"]) * 204
@@ -200,7 +211,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             frozenset(r for r in rule_ids if rules[r].get("recommendation_group") == "current_major_required"),
             frozenset(r for r in rule_ids if rules[r].get("recommendation_group") == "required_general"),
             code in preferred, section["credit_bucket"], section["eligibility"] == "needs_review",
-            candidate.get("interest_score", 0), room_building(section["room"], aliases),
+            section["interest_score"], rating_score(section), room_building(section["room"], aliases),
             section.get("core_area"),
         ))
 
@@ -211,6 +222,13 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             section = restricted[offering_id]
             response["issues"].append(
                 f"고정 분반 {section['course_code']}-{section['section_code']} 수강 불가 ({section['reason']})")
+        return dict(response, outcome="no_feasible_plan", search_status="complete")
+    if late_locks := locked & late_sections.keys():
+        for offering_id in sorted(late_locks):
+            section = late_sections[offering_id]
+            response["issues"].append(
+                f"고정 분반 {section['course_name']} {section['section_code']}은 11교시 이후 수업이 있습니다. "
+                "늦은 수업 포함을 선택하거나 분반 고정을 해제해주세요.")
         return dict(response, outcome="no_feasible_plan", search_status="complete")
     available_ids = {option.section["offering_id"] for items in options.values() for option in items}
     if locked - available_ids:
@@ -232,7 +250,10 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             restrictions_by_code[section["course_code"]].add(section["reason"])
         for code in sorted(missing):
             reasons = restrictions_by_code.get(code)
-            if reasons and code not in pool_codes:
+            if code in late_courses:
+                response["issues"].append(
+                    f"필수 과목 {code}에 11교시 이후 수업이 있습니다. 늦은 수업 포함 여부를 확인해주세요.")
+            elif reasons and code not in pool_codes:
                 response["issues"].append(f"필수 과목 {code}의 분반은 수강 대상에서 제외됩니다. {' / '.join(sorted(reasons))}")
             else:
                 response["issues"].append(f"필수 과목 {code}의 편성 가능한 분반이 없습니다.")
@@ -246,11 +267,14 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     if len(set(required_areas)) != len(required_areas):
         response["issues"] = ["같은 핵심교양 영역에서 둘 이상 필수 과목으로 지정했습니다."]
         return dict(response, outcome="no_feasible_plan", search_status="complete")
+    for items in options.values():
+        items.sort(key=lambda option: (option.uncertain, -(option.rating or 0), option.section["section_code"]))
     # Explore both elective buckets early, even when one has many more offerings.
     elective_codes = {
         bucket: sorted(
             (code for code, items in options.items() if items[0].bucket == bucket),
-            key=lambda code: (-options[code][0].interest, code),
+            key=lambda code: (-options[code][0].interest, options[code][0].uncertain,
+                              -(options[code][0].rating or 0), code),
         )
         for bucket in buckets
     }
@@ -262,8 +286,6 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         code not in preferred, elective_positions.get(code, len(options)),
         earned.get(options[code][0].bucket, 0), code,
     ))
-    for items in options.values():
-        items.sort(key=lambda option: (option.uncertain, option.section["section_code"]))
     remaining = [0] * (len(keys) + 1)
     for index in range(len(keys) - 1, -1, -1):
         remaining[index] = remaining[index + 1] + max(item.units for item in options[keys[index]])
@@ -309,7 +331,10 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
                  -sum(applied.values()), balance, high - units, adjacent)
         if sort != "recommended":
             order += (days,) if sort == "fewest_days" else (gaps,)
-        order += (uncertain, days, gaps, -sum(item.interest for item in chosen),
+        interest = sum(item.interest for item in chosen)
+        scores = [item.rating for item in chosen if item.rating is not None]
+        average = sum(scores) / len(scores) if scores else None
+        order += (uncertain, days, gaps, -interest, -(average or 0), -len(scores),
                   missing_distances, distance,
                   tuple(sorted(item.section["offering_id"] for item in chosen)))
         if key in plans and plans[key][0] <= order:
@@ -321,7 +346,9 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             del plans[worst]
         plans[key] = (order, dict(credits=units / 100, days=days, gap_periods=gaps / 2,
                                   major_credits=counts["major"] / 100, general_credits=counts["general"] / 100,
-                                  adjacent_sessions=adjacent,
+                                  adjacent_sessions=adjacent, interest_score=interest,
+                                  average_everytime_rating=round(average, 2) if average is not None else None,
+                                  rated_section_count=len(scores),
                                   provisional=bool(uncertain), requirements=sorted(major | general),
                                   offerings=[item.section for item in chosen]))
 
