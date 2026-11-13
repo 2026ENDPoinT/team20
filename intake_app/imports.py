@@ -1,4 +1,5 @@
 """Stage Everytime rows and apply explicitly selected changes to a student draft."""
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 
@@ -65,6 +66,36 @@ def prepare_import(collection, document, origins):
                for failure in collection['failures']]
     return dict(imported_at=collection['imported_at'], import_status=collection['import_status'],
                 summary=collection['summary'], course_attempts=rows, changes=changes, issues=issues), hashes
+
+
+def replace_import(document, preview, hashes, selected):
+    rows = {row['id']: row for row in preview['course_attempts']}
+    ensure(isinstance(selected, list) and 0 < len(selected) <= 300
+           and all(isinstance(item, str) and item in rows for item in selected)
+           and len(set(selected)) == len(selected), '가져올 과목을 다시 선택해주세요.')
+    now = datetime.now(timezone(timedelta(hours=9)))
+    # Calendar estimate for the initial status. Each imported status can be edited.
+    month = now.month
+    year = now.year - int(month <= 2)
+    current = (year, 3 if month <= 2 else 0 if month <= 6 else 1 if month <= 8 else 2)
+    order = {'1': 0, 'summer': 1, '2': 2, 'winter': 3}
+    existing = {row['id']: row for row in document['course_attempts']}
+    attempts = []
+    for item in selected:
+        row = dict(rows[item])
+        previous = existing.get(item)
+        if previous and previous.get('source_ref') == row['source_ref'] and all(
+                previous[field] == row[field] for field in IDENTITY_FIELDS):
+            row = dict(previous)
+        elif row['course_name']:
+            term_year, period = row['term'].split('-')
+            term = (int(term_year), order[period])
+            if term <= current:
+                row.update(completion_status='completed' if term < current else 'in_progress',
+                           user_confirmed=True)
+        attempts.append(row)
+    document.update(course_attempts=attempts, history_complete=False)
+    return {item: hashes[item] for item in selected}
 
 
 def apply_import(document, preview, hashes, accepted_adds, accepted_updates):

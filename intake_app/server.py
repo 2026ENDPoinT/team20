@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from everytime_import.importer import ImportFailure, collect
 
 from .domain import ValidationError, ensure, validate_document, document_warnings
-from .imports import apply_import, check_import_sources, prepare_import
+from .imports import apply_import, check_import_sources, prepare_import, replace_import
 from .offerings import compare_offerings
 from .recommendations import recommend
 from .store import Store, ConflictError
@@ -68,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.respond(403, {'error': '로컬 앱에서 접근해주세요.'})
         path = urlsplit(self.path).path
-        static = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        static = {'/': ('index.html', 'text/html'), '/recommendations': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if path in static:
             filename, mime = static[path]
             return self.send_bytes(200, (BASE / 'static' / filename).read_bytes(), mime + '; charset=utf-8')
@@ -105,7 +105,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/recommendations':
                 saved = self.load_version(version)
                 ensure(saved['document'] is not None, '학생 정보와 이수내역을 먼저 저장해주세요.')
-                result = recommend(self.server.official_db, validate_document(saved['document']))
+                document = validate_document(saved['document'])
+                if value.get('automatic_term') is True:
+                    document['student'].update(target_term=None, recognition_notes='')
+                result = recommend(self.server.official_db, document)
                 self.load_version(version)
                 return self.respond(200, dict(result, input_revision=version))
             final = value.get('reviewed', False)
@@ -165,8 +168,11 @@ class Handler(BaseHTTPRequestHandler):
         if preview['base_revision'] != version:
             raise ConflictError('학생 입력이 변경됐습니다. 공유 링크를 다시 가져와주세요.')
         document = validate_document(saved['document'] or EMPTY_DOCUMENT)
-        origins = apply_import(document, preview, hashes, value.get('accepted_attempt_ids'),
-                               value.get('accepted_update_ids'))
+        if value.get('replace') is True:
+            origins = replace_import(document, preview, hashes, value.get('accepted_attempt_ids'))
+        else:
+            origins = apply_import(document, preview, hashes, value.get('accepted_attempt_ids'),
+                                   value.get('accepted_update_ids'))
         document = validate_document(document)
         result = self.server.store.save(document, version, import_origins=origins)
         return self.respond(200, dict(**result, document=document, warnings=document_warnings(document)))

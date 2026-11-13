@@ -52,9 +52,13 @@ def recommendation_data(database, document):
         db.row_factory = sqlite3.Row
         db.execute('BEGIN')
         snapshots = active_snapshots(db)
-        target = snapshots.get(school_term(document['student']['target_term']))
+        requested = document['student']['target_term']
+        target = (snapshots.get(school_term(requested)) if requested else
+                  max((row for term, row in snapshots.items() if term[-1] in '12'),
+                      key=lambda row: row['term'], default=None))
+        target_term = f"{target['term'][:4]}-{target['term'][-1]}" if target and not requested else requested
         matches = [compare_attempt(db, snapshots, row, include_metadata=True,
-                                   check_in_progress=row['term'] == document['student']['target_term'])
+                                   check_in_progress=row['term'] == target_term)
                    for row in document['course_attempts']]
         offerings = []
         if target:

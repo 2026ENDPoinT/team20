@@ -76,7 +76,7 @@ def validate_document(value, final=False):
     ensure(min_credits is None or max_credits is None or min_credits <= max_credits, '최소학점이 최대학점보다 큽니다.')
     year = number(student.get('admission_year'), '입학연도', 1990, 2099, integer=True, nullable=not final)
     grade = number(student.get('grade'), '학년', 1, 4, integer=True, nullable=not final)
-    target = term(student.get('target_term'), nullable=not final)
+    target = term(student.get('target_term'), nullable=True)
     program = student.get('program_type')
     ensure(program in (None, 'standard_single_major_day', 'other'), '이수 과정을 확인하세요.')
     if final and schema == 2:

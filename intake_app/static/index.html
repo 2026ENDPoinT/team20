@@ -2,27 +2,41 @@
 <html lang="ko">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>수강나침반 · 내 수강 정보</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
 <body>
-<aside class="sidebar">
-  <a class="brand" href="/" aria-label="수강나침반 홈"><span class="brand-icon">↗</span><span>수강나침반<small>COURSE COMPASS</small></span></a>
-  <div class="workspace-label">MY WORKSPACE</div>
-  <div class="nav-current"><span>▦</span> 내 수강 정보 <span class="nav-dot"></span></div>
-  <button type="button" id="recommend-nav" class="nav-future">◇ <span>과목 추천</span></button>
-  <div class="nav-future">▤ <span>시간표 플랜</span><small>준비 중</small></div>
-  <div class="sidebar-bottom"><span class="campus-mark">S</span><div>서울과학기술대학교<small>컴퓨터공학과 · 해커톤 2026</small></div></div>
-</aside>
-<div class="app-shell">
-  <header class="topbar"><div>내 수강 정보 <span>/</span> 입력하기</div><span class="local-pill"><i></i> 로컬 워크스페이스</span></header>
-  <main>
-    <div class="intro"><div><div class="eyebrow">YOUR NEXT SEMESTER, STARTS HERE</div><h1>나에게 맞는 수강의 시작</h1><p>학생 정보와 지난 시간표를 모아, 다음 학기를 준비해보세요.</p></div><span class="phase-pill">입력 단계</span></div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/" aria-label="수강나침반 홈"><span class="brand-icon" aria-hidden="true"></span>수강나침반</a>
+    <nav class="top-actions" aria-label="주 메뉴">
+      <a id="home-nav" href="/">수강 정보</a>
+      <a id="recommend-nav" href="/recommendations" target="_blank" rel="noopener">과목 추천</a>
+    </nav>
+    <button id="my-info" class="button secondary" type="button" aria-haspopup="dialog"><span class="profile-icon" aria-hidden="true"></span>내 정보</button>
+  </div>
+</header>
+<main>
+    <section class="page-hero" id="home-panel" hidden>
+      <h1>수강 정보</h1>
+      <p>학생 정보와 이수내역을 확인하세요.</p>
+      <button id="edit-profile" class="button" type="button" aria-haspopup="dialog">수강 정보 입력·수정</button>
+    </section>
+    <section id="recommendations" aria-labelledby="recommendation-title" hidden>
+      <header class="page-hero">
+        <div class="hero-row"><h1 id="recommendation-title">과목 추천</h1><button id="run-recommendations" class="button">다시 추천받기</button></div>
+        <div id="recommendation-metrics" class="summary-metrics" hidden></div>
+        <p id="recommendation-summary" role="status"></p>
+      </header>
+      <div id="recommendation-results"></div>
+    </section>
+    <dialog id="profile-dialog" aria-labelledby="profile-title">
+      <header class="dialog-header"><h1 id="profile-title">내 수강 정보</h1><button id="close-profile" class="button secondary" type="button">닫기</button></header>
+      <div id="profile-content">
     <nav class="steps" aria-label="입력 단계">
-      <button class="step active" data-step="1"><b>01</b><span>학생 정보<small>기본 정보와 관심 주제</small></span></button>
-      <button class="step" data-step="2"><b>02</b><span>이수 내역<small>공유 링크 또는 직접 입력</small></span></button>
-      <button class="step" data-step="3"><b>03</b><span>확인 및 저장<small>누락 없이 한 번 더</small></span></button>
+      <div class="step active" data-step="1"><span>학생 정보</span></div>
+      <div class="step" data-step="2"><span>이수 내역</span></div>
+      <div class="step" data-step="3"><span>확인 및 저장</span></div>
     </nav>
     <div id="message" class="message" role="status" aria-live="polite" hidden></div>
     <section id="step-1" class="step-panel">
-      <div class="columns"><div>
-      <section class="card"><div class="card-title"><span class="section-icon">01</span><div><h2>학생 기본 정보</h2><p>전체 학번 대신 입학연도만 입력해주세요.</p></div></div>
+      <section class="card"><div class="card-title"><div><h2>학생 기본 정보</h2></div></div>
         <div class="form-grid">
           <label>입학연도 <span class="required">*</span><input id="admission-year" type="number" min="1990" max="2099" placeholder="예: 2024"></label>
           <label>현재 학년 <span class="required">*</span><select id="grade"><option value="">학년 선택</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option><option value="4">4학년 이상</option></select></label>
@@ -30,18 +44,15 @@
           <label>입학 유형<select id="admission-type"><option value="freshman">신입학</option><option value="transfer">편입학</option></select></label>
           <label>이수 과정<select id="program-type"><option value="">선택</option><option value="standard_single_major_day">주간 일반과정 단일전공</option><option value="other">기타 과정</option></select></label>
           <label>이수한 정규학기 수 <span class="optional">선택</span><input id="regular-terms" type="number" min="0" max="300" step="1"></label>
-          <label class="wide">추천받을 학기 <span class="required">*</span><input id="target-term" placeholder="예: 2027-1" list="terms"><small>1학기: 2027-1 · 2학기: 2027-2 · 계절학기: 2027-summer / winter</small></label>
         </div>
         <div id="transfer-box" class="subsection" hidden><p class="notice">편입생 정보는 입력할 수 있습니다. 졸업요건 적용은 편입학 기준을 확보한 후 지원합니다.</p><label>승인받은 편입 인정학점 <span class="optional">선택</span><input id="transfer-credits" type="number" min="0" max="300" step="0.5" placeholder="확인된 학점만 입력"></label></div>
       </section>
-      <section class="card"><div class="card-title"><span class="section-icon">02</span><div><h2>다음 학기 선호</h2><p>교양 추천에 반영할 관심 주제를 선택해주세요.</p></div></div>
+      <section class="card"><div class="card-title"><div><h2>다음 학기 선호</h2></div></div>
         <div class="form-grid"><label>희망 최소학점 <span class="optional">선택</span><input id="min-credits" type="number" min="0" max="30" step="0.5" placeholder="예: 15"></label><label>희망 최대학점 <span class="optional">선택</span><input id="max-credits" type="number" min="0" max="30" step="0.5" placeholder="예: 20"></label></div>
-        <p class="field-hint">희망 범위입니다. 학교의 실제 수강 가능 학점은 추후 확인합니다.</p>
+        
         <div class="field-label">관심 주제 <span class="optional">여러 개 선택 가능</span></div><div id="tags" class="tags"></div>
         <div class="inline-field"><input id="custom-tag" maxlength="100" placeholder="관심 주제 직접 입력" aria-label="관심 주제 직접 입력"><button id="add-tag" class="button secondary">추가</button></div>
-        <label class="notes-label">면제·인정 사항 <span class="optional">선택</span><textarea id="recognition-notes" maxlength="2000" placeholder="예: 공인 영어성적으로 필수 영어 수강 면제 승인. 학점 자동 취득과는 구분됩니다."></textarea></label>
-      </section></div>
-      <aside class="help-card"><div class="help-symbol">✦</div><h3>내 정보부터<br>차근차근.</h3><p>입학연도에 따라 필요한 과목과 졸업요건이 달라져요.</p><div class="help-divider"></div><h4>이번 단계에서 할 일</h4><ul><li>기본 정보 입력</li><li>학기별 시간표에서 과목 정리</li><li>실제 이수 여부 확인</li></ul><div class="soft-note">이수 상태를 확인하고 저장하면 공식 개설강좌와 대조할 수 있어요.</div></aside></div>
+      </section>
     </section>
     <section id="step-2" class="step-panel" hidden>
       <section class="card">
@@ -53,32 +64,37 @@
         <p id="import-progress" role="status" hidden></p>
         <div id="import-preview" hidden>
           <p id="import-summary"></p>
+          <p class="field-hint">기존 수강내역을 선택한 과목으로 교체합니다. 지난 학기는 이수 완료, 진행 중인 학기는 수강 중으로 표시합니다. 상태는 가져온 뒤 수정할 수 있습니다.</p>
           <div id="import-table" class="table-wrap"></div>
-          <div class="button-row selection-toolbar"><button id="apply-import" class="button primary">선택한 과목 가져오기</button><span id="import-selection" role="status"></span></div>
+          <div class="button-row selection-toolbar"><button id="apply-import" class="button primary">선택한 과목으로 교체</button><span id="import-selection" role="status"></span></div>
         </div>
       </section>
-      <section class="card"><div class="list-heading"><div><h2>내 수강 내역 <span id="course-count" class="count">0</span></h2><p>이수 완료한 과목만 선택해 한 번에 확인하세요. 수강 중이거나 미이수한 과목은 상태를 바꿀 수 있습니다.</p></div><button id="add-course" class="button secondary">＋ 직접 추가</button></div>
-        <div class="bulk-toolbar"><label>학기 일괄 지정<input id="bulk-term" placeholder="예: 2026-2" list="terms"></label><button id="apply-term" class="button subtle">학기 없는 과목에 적용</button><button id="merge" class="button subtle">같은 학기·이름 묶기</button></div>
-        <p class="field-hint">묶기는 확인한 뒤 눌러주세요. 동명 과목이 서로 다른 과목일 수도 있습니다.</p>
+      <section class="card"><div class="list-heading"><div><h2>내 수강 내역 <span id="course-count" class="count">0</span></h2></div><button id="add-course" class="button secondary">＋ 직접 추가</button><button id="delete-all" class="button secondary danger" type="button">전체 삭제</button></div>
+        <details><summary>수강내역 일괄 편집</summary><div class="bulk-toolbar"><label>학기 일괄 지정<input id="bulk-term" placeholder="예: 2026-2" list="terms"></label><button id="apply-term" class="button subtle">학기 없는 과목에 적용</button><button id="merge" class="button subtle">같은 학기·이름 묶기</button></div></details>
         <div class="button-row selection-toolbar" id="course-selection-toolbar" hidden><button id="confirm-selected" class="button primary">선택 과목 이수 완료</button><span id="course-selection" role="status"></span></div>
         <div id="course-list" class="table-wrap"></div>
       </section>
     </section>
     <section id="step-3" class="step-panel" hidden>
-      <section class="card"><div class="card-title"><span class="section-icon">✓</span><div><h2>입력 내용을 확인해주세요</h2><p>확인한 이수 완료 과목은 학교 개설강좌 목록과 대조할 수 있습니다.</p></div></div><div id="summary-stats" class="summary-stats"></div><div id="summary-profile" class="summary-profile"></div><div id="summary-table" class="table-wrap"></div><label class="history-check"><input id="history-complete" type="checkbox"><span>현재까지의 모든 수강 학기와 누락 과목을 확인했습니다.<small>일부만 입력했다면 체크하지 않아도 저장할 수 있습니다.</small></span></label><div id="review-warnings"></div></section>
+      <section class="card"><div class="card-title"><div><h2>입력 내용을 확인해주세요</h2></div></div><div id="summary-stats" class="summary-stats"></div><div id="summary-profile" class="summary-profile"></div><div id="summary-table" class="table-wrap"></div><label class="history-check"><input id="history-complete" type="checkbox"><span>현재까지의 모든 수강 학기와 누락 과목을 확인했습니다.<small>일부만 입력했다면 체크하지 않아도 저장할 수 있습니다.</small></span></label><div id="review-warnings"></div></section>
       <section class="card">
         <div class="list-heading"><h2>공식 개설강좌 대조</h2><button id="compare-offerings" class="button secondary">저장한 이수 과목 대조</button></div>
         <p id="comparison-summary" role="status"></p>
         <div id="comparison-table" class="table-wrap"></div>
       </section>
-      <section class="card" id="recommendations">
-        <div class="list-heading"><h2>과목 추천</h2><button id="run-recommendations" class="button primary">추천 보기</button></div>
-        <p id="recommendation-summary" role="status"></p>
-        <div id="recommendation-results"></div>
-      </section>
     </section>
-    <footer class="actionbar"><div id="save-state">아직 저장하지 않았어요</div><div class="button-row"><button id="export" class="button subtle">JSON 내보내기</button><button id="save" class="button secondary">임시 저장</button><button id="next" class="button primary">이수 내역 입력 <span>→</span></button></div></footer>
-    <div class="bottom-note">학생 정보와 이수 내역은 이 컴퓨터에 저장됩니다.</div>
+    <footer class="actionbar"><div id="save-state" role="status">불러오는 중</div><div class="button-row"><button id="export" class="button subtle" type="button">JSON 내보내기</button><button id="back" class="button secondary" type="button" hidden>이전</button><button id="next" class="button primary" type="button">다음</button></div></footer>
+    </div></dialog>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+      <div class="card">
+        <h2 id="confirm-title">수강내역 변경 확인</h2>
+        <p id="confirm-text"></p>
+        <form method="dialog" class="button-row">
+          <button class="button secondary" value="cancel" autofocus>취소</button>
+          <button class="button primary" value="confirm">확인</button>
+        </form>
+      </div>
+    </dialog>
   </main>
-</div><datalist id="terms"><option value="2024-1"><option value="2024-2"><option value="2025-1"><option value="2025-2"><option value="2026-1"><option value="2026-2"><option value="2027-1"></datalist>
+<datalist id="terms"><option value="2024-1"><option value="2024-2"><option value="2025-1"><option value="2025-2"><option value="2026-1"><option value="2026-2"><option value="2027-1"></datalist>
 </body></html>

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .domain import ensure
+from .interest_tags import classify, load_tags
 from .offerings import normalized_name, recommendation_data, school_term
 
 DATA = Path(__file__).resolve().parents[1] / 'data' / 'graduation_requirements'
@@ -180,18 +181,23 @@ def eligibility(offering):
 def recommend(database, document):
     student = document['student']
     year, grade = student.get('admission_year'), student.get('grade')
-    ensure(year and grade and student.get('target_term'), '입학연도, 현재 학년, 추천 학기를 입력하고 저장해주세요.')
+    ensure(year and grade, '입학연도와 현재 학년을 입력해주세요.')
     ensure(2021 <= year <= 2026 and student['admission_type'] == 'freshman'
            and student['program_type'] == 'standard_single_major_day',
            '추천은 2021~2026학번 컴퓨터공학과 주간 일반 신입학·단일전공을 지원합니다.')
     data = json.loads((DATA / f'{year}.json').read_text(encoding='utf-8'))
     ensure(all(student.get(key) == value for key, value in data['applies_to'].items()),
            '학생 정보와 일치하는 졸업요건 자료가 없습니다.')
-    target_year = student['target_term'][:4]
     grade_data = json.loads((DATA.parent / 'course_grades.json').read_text(encoding='utf-8'))
     alternatives = json.loads((DATA.parent / 'course_alternatives.json').read_text(encoding='utf-8'))
     target, matches, offerings = recommendation_data(database, document)
     ensure(target is not None, '추천 학기의 개설강좌 자료가 없습니다.')
+    target_year = target['term'][:4]
+    target_term = student['target_term'] or f"{target_year}-{target['term'][-1]}"
+    ensure(int(target_year) >= year, '입학연도 이후의 개설강좌 자료가 없습니다.')
+    if student['target_term'] is None:
+        student = dict(student, target_term=target_term)
+        document = dict(document, student=student)
     grade_table = grade_data.get(target_year, {}).get('codes_by_grade', {})
     grades = {code: int(level) for level, group in grade_table.items() for code in group}
     # Verified common placement of the five department requirements.
@@ -246,7 +252,10 @@ def recommend(database, document):
         state = eligibility(offering)
         if state != 'excluded':
             by_code[code].append(dict(offering, eligibility=state))
-    interests = [normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)]
+    tags, by_label, by_course = load_tags()
+    interests = {normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)}
+    selected = {by_label[tag] for tag in interests if tag in by_label}
+    custom = interests - by_label.keys()
     items = []
     for code, sections in by_code.items():
         sections.sort(key=lambda row: (row['eligibility'] == 'needs_review', row['section_code']))
@@ -289,8 +298,13 @@ def recommend(database, document):
         if lower_grade:
             reasons.append('현재 학년보다 낮은 학년의 전공선택')
         search_name = normalized_name(lead['course_name'] + ' ' + (lead['english_name'] or ''))
-        interest = sum(tag in search_name for tag in interests)
-        if interest:
+        matched_tags = selected & classify(lead, tags, by_course)
+        custom_matches = sum(tag in search_name for tag in custom)
+        interest = len(matched_tags) + custom_matches
+        if matched_tags:
+            labels = [tag['label'] for tag in tags if tag['id'] in matched_tags]
+            reasons.append('관심 주제 일치 · ' + ', '.join(labels))
+        if custom_matches:
             reasons.append('과목명과 관심 주제가 일치')
         uncertain = all(row['eligibility'] == 'needs_review' for row in sections)
         grade_rank = 0
