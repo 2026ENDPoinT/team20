@@ -156,7 +156,7 @@ def search_schedule_courses(database, document, request, *, ratings_db=None):
     query = normalized_name(query)
     ensure(query, "강좌코드 또는 강좌명을 입력해주세요.")
     lecture_code = LECTURE_CODE.fullmatch(query)
-    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    result, pool, *_ = basket_schedule_context(database, document, ratings_db=ratings_db)
     matches = {}
     for row in pool:
         code, name, credits = row["course_code"], row["course_name"], row["credits"]
@@ -187,7 +187,7 @@ def search_schedule_courses(database, document, request, *, ratings_db=None):
 
 def basket_sections(database, document, request, *, ratings_db=None):
     codes = request_codes(request, "courses")
-    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    result, pool, *_ = basket_schedule_context(database, document, ratings_db=ratings_db)
     courses = {}
     for row in pool:
         code = row["course_code"]
@@ -200,7 +200,41 @@ def basket_sections(database, document, request, *, ratings_db=None):
     return dict(target_term=result["target_term"], courses=courses)
 
 
-def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None):
+def project_schedule(plan, official, baseline, project):
+    planned = [official[row["offering_id"]] for row in plan["offerings"]]
+    confirmed = [row for row in planned if row["eligibility"] != "needs_review"]
+    after = project(confirmed)
+    conditional = project(planned) if len(confirmed) != len(planned) else after
+    changes = {
+        row["id"]: dict(after=dict(current=next_row["current"], status=next_row["status"]),
+                        conditional=dict(current=all_row["current"], status=all_row["status"]),
+                        offering_ids=[])
+        for row, next_row, all_row in zip(baseline, after, conditional)
+        if (row["current"], row["status"]) != (next_row["current"], next_row["status"])
+        or (row["current"], row["status"]) != (all_row["current"], all_row["status"])
+    }
+    if changes:
+        # Attribute a change only when removing the section actually changes the rule result.
+        for offering in planned:
+            remaining = [row for row in planned if row is not offering]
+            if offering in confirmed:
+                scenarios = [(conditional, remaining)] if after is conditional else [
+                    (conditional, remaining), (after, [row for row in confirmed if row is not offering]),
+                ]
+            else:
+                scenarios = [(conditional, remaining)]
+            affected = set()
+            for expected, sections in scenarios:
+                for row, without in zip(expected, project(sections)):
+                    if (row["current"], row["status"]) != (without["current"], without["status"]):
+                        affected.add(row["id"])
+            for rule_id in changes.keys() & affected:
+                changes[rule_id]["offering_ids"].append(offering["offering_id"])
+    return changes
+
+
+def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None,
+             include_graduation_projection=True):
     student = document["student"]
     lower = request.get("min_credits")
     upper = request.get("max_credits")
@@ -227,7 +261,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     ensure(isinstance(sort, str) and sort in SORTS, "정렬 기준을 확인해주세요.")
 
     document = dict(document, student=dict(student, target_term=None, recognition_notes=""))
-    result, pool, alternatives, deficits, restricted = recommend(
+    result, pool, alternatives, deficits, restricted, project = recommend(
         database, document, schedule_context=True, ratings_db=ratings_db)
     candidates = {row["course_code"]: row for row in result["candidates"]}
     rules = {rule["id"]: rule for rule in result["requirements"]}
@@ -489,6 +523,12 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         hit_limit = truncated
     truncated = hit_limit
     response["candidates"] = select_schedule_candidates(plans)
+    if response["candidates"] and include_graduation_projection:
+        baseline = result["requirements"]
+        official = {row["offering_id"]: row for row in pool}
+        response["graduation_requirements"] = baseline
+        for plan in response["candidates"]:
+            plan["graduation_projection"] = project_schedule(plan, official, baseline, project)
     if truncated:
         response["issues"].append("탐색 한도 안에서 찾은 결과입니다.")
     if not plans and unknown_times:

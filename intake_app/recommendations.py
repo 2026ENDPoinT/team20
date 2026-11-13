@@ -51,7 +51,7 @@ def exclusion_map(data):
     return excluded
 
 
-def evaluate(data, document, matches, elective_groups):
+def evaluate(data, document, matches, elective_groups, *, planned=()):
     rules = {r['id']: r for group in data['requirements'].values() for r in group}
     general_codes = set().union(*(codes(r) for id, r in rules.items() if id not in MAJOR_REQUIRED))
     attempts = {row['id']: row for row in document['course_attempts']}
@@ -76,6 +76,11 @@ def evaluate(data, document, matches, elective_groups):
             continue
         completed[code].append(match['offering'])
         completion_years[code].add(attempt['term'][:4])
+
+    for offering in planned:
+        code = offering['course_code']
+        completed[code].append(offering)
+        completion_years[code].add(str(target[0]))
 
     uncertain_rules, uncertain_codes = set(), set()
     credit_reviews = []
@@ -353,5 +358,8 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                  core_area=area_by_code.get(code), core_area_occupied=area_by_code.get(code) in occupied_areas)
             for code, sections in by_code.items() for section in sections
         ]
-        return response, pool, alternative_by_code, deficits, restricted_sections
+        def project(planned):
+            return evaluate(data, document, matches, elective_groups, planned=planned)[1]
+
+        return response, pool, alternative_by_code, deficits, restricted_sections, project
     return response
