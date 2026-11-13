@@ -28,7 +28,6 @@ const recommendationPage = location.pathname === '/recommendations';
 const schedulePage = location.pathname === '/schedules';
 document.title = (schedulePage ? '시간표 생성' : recommendationPage ? '과목 추천' : '홈') + ' · 수강나침반';
 $(schedulePage ? '#schedule-nav' : recommendationPage ? '#recommend-nav' : '#home-nav').setAttribute('aria-current', 'page');
-if (recommendationPage) $('#recommend-nav').removeAttribute('target');
 let saveTimer, pendingSave, draftConflict = false, loaded = false;
 const fields={'admission-year':'admission_year',grade:'grade',department:'department_id','admission-type':'admission_type','regular-terms':'regular_terms_completed','min-credits':'min_credits','max-credits':'max_credits','transfer-credits':'transfer_recognized_credits'};
 const numeric = new Set(['admission_year','grade','min_credits','max_credits','transfer_recognized_credits','regular_terms_completed']);
@@ -623,9 +622,9 @@ const recommendationStatus = {met:'충족', not_met:'미충족', needs_review:'�
 const majorRequiredGroups = ['current_major_required', 'future_major_required'];
 const recommendationGroups = [
   ['major_required', '전공필수'],
-  ['required_general', '필수 교양'],
+  ['required_general', '교양필수'],
   ['major_credits', '전공선택'],
-  ['general_credits', '교양'],
+  ['general_credits', '교양선택'],
 ];
 
 function matchesRecommendationGroup(actual, group) {
@@ -743,20 +742,27 @@ function courseCredits(course) {
   return [...new Set(course.sections.map(section => section.credits ?? '—'))].join(' / ') || '—';
 }
 
-function recommendationCourse(course) {
+function recommendationCourse(course, requirementTitle = '') {
   const matched = course.reasons.find(reason => reason.startsWith('관심 주제 일치'));
-  const reasons = course.reasons.filter(reason => reason !== matched);
-  const unmet = course.requirement_ids.length !== 0;
+  const reasons = course.reasons.filter(reason => reason !== matched && reason !== requirementTitle &&
+    !['전공학점 후보', '교양학점 후보'].includes(reason) && !reason.startsWith('현재 입력 기준'));
   const courseName = esc(course.course_name);
   const grade = course.recommended_grade ? `${course.recommended_grade}학년` : '';
   const meta = [course.course_code, grade, `${courseCredits(course)}학점`].filter(Boolean).join(' · ');
-  return `<li class="rec-item${unmet ? ' rec-item--required' : matched ? ' rec-item--match' : ''}">
+  const scores = course.sections.filter(section =>
+    section.eligibility === course.eligibility && section.everytime_rating?.status === 'rated')
+    .map(section => section.everytime_rating.score).filter(Number.isFinite);
+  const score = scores.length ? Math.max(...scores) : null;
+  return `<div class="rec-item">
     <div class="rec-item-main">
       <strong class="course-title">${courseName}</strong>
       <small>${esc(meta)}</small>
-      ${matched ? `<span class="rec-highlight">${lineIcon('tag')} ${esc(matched)}</span>` : ''}
       ${reasons.length ? `<details class="rec-reasons"><summary>추천 이유</summary>
         <ul>${reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}
+    </div>
+    <div class="rec-signals">
+      ${matched ? `<span class="rec-highlight">${lineIcon('tag')} ${esc(matched.replace(/^관심 주제 일치 · /, ''))}</span>` : ''}
+      <span class="rec-score">${score !== null ? `최고 분반 ★ ${score.toFixed(2)}` : '별점 자료 없음'}</span>
     </div>
     <div class="rec-item-actions">
       <button type="button" class="button secondary" data-view-sections="${esc(course.course_code)}"
@@ -764,14 +770,20 @@ function recommendationCourse(course) {
       <button type="button" class="button secondary basket-add" data-basket-add="${esc(course.course_code)}" data-course-name="${courseName}">+</button>
       ${course.eligibility === 'needs_review' ? '<small>수강 조건 확인</small>' : ''}
     </div>
-  </li>`;
+  </div>`;
 }
 
-function recommendationList(entries) {
-  return `<ul class="rec-list">${entries.map(courses => courses.length > 1
-    ? `<li class="rec-alternatives"><strong>${esc(courses[0].alternative_group.title)} · 택1</strong>
-      <ul class="rec-list">${courses.map(recommendationCourse).join('')}</ul></li>`
-    : recommendationCourse(courses[0])).join('')}</ul>`;
+function recommendationList(entries, startRank = null, requirementTitle = '') {
+  const ranked = startRank !== null;
+  const tag = ranked ? 'ol' : 'ul';
+  return `<${tag} class="rec-list${ranked ? ' rec-ranked' : ''}" role="list"${ranked ? ` start="${startRank}"` : ''}>${entries.map((courses, index) =>
+    `<li class="rec-list-entry">
+      ${ranked ? `<span class="rec-rank-number">${startRank + index}<span class="sr-only">위</span></span>` : ''}
+      <div class="rec-entry-courses">
+        ${courses.length > 1 ? `<div class="rec-choice-title">${esc(courses[0].alternative_group.title)} <span>택1</span></div>` : ''}
+        ${courses.map(course => recommendationCourse(course, requirementTitle)).join('')}
+      </div>
+    </li>`).join('')}</${tag}>`;
 }
 
 let recommendedCourses = new Map();
@@ -917,6 +929,7 @@ function renderRecommendations(result) {
       rule.status !== 'met' && matchesRecommendationGroup(rule.recommendation_group, group));
     const creditRule = result.requirements.find(rule => rule.id === group.replace('_credits', ''));
     let content;
+    let remaining = 0;
     const heading = group === 'major_required' ? 'h4' : 'h3';
     const renderRule = rule => {
       const options = rows.filter(course => course.requirement_ids.includes(rule.id));
@@ -934,22 +947,20 @@ function renderRecommendations(result) {
         <div class="requirement-status">
           ${notes.length ? `<span class="requirement-meta">${esc(notes.join(' · '))}</span>` : ''}
           ${availability}</div></div>
-        ${options.length ? recommendationList(options.map(course => [course])) : ''}`;
+        ${options.length ? recommendationList(options.map(course => [course]), null, rule.title) : ''}`;
     };
     if (group === 'major_required') {
       content = renderMajorRequired(required, renderRule);
     } else if (required.length) {
       content = required.map(renderRule).join('');
     } else if (group.endsWith('_credits')) {
-      const main = entries.filter(entry => entry.some(course => !course.lower_grade));
-      const lower = entries.filter(entry => entry.every(course => course.lower_grade));
-      const remaining = creditRule ? Math.max(0, creditRule.target - creditRule.current) : 0;
-      const progress = remaining
-        ? `<p>현재 입력 기준 ${remaining}학점 남음${creditRule.status === 'needs_review' ? ' · 확인 필요' : ''}</p>`
-        : '';
-      content = progress + (main.length ? recommendationList(main) : '') +
-        (lower.length ? `<details><summary>저학년 전공선택 더 보기 · ${lower.length}개</summary>${recommendationList(lower)}</details>` : '') +
-        (!rows.length ? '<p>이번 학기 추천 후보가 없습니다.</p>' : '');
+      const featured = entries.slice(0, 5);
+      const additional = entries.slice(featured.length);
+      remaining = creditRule ? Math.max(0, creditRule.target - creditRule.current) : 0;
+      content = (entries.length ? recommendationList(featured, 1)
+        : '<p>이번 학기 추천 후보가 없습니다.</p>') +
+        (additional.length ? `<details class="rec-more"><summary>다른 후보 ${additional.length}개 보기</summary>
+          ${recommendationList(additional, featured.length + 1)}</details>` : '');
     } else {
       content = '<p>남은 요건이 없습니다.</p>';
     }
@@ -958,7 +969,7 @@ function renderRecommendations(result) {
       (group === 'required_general' && rows.length > 0 && required.length > 0);
     const open = group === 'major_required' && required.length > 0;
     return `<details class="result-panel${priority ? ' result-panel--priority' : ''}"${open ? ' open' : ''}>
-      <summary>${lineIcon(group.includes("major") ? "book" : "grid")}${title}${priority ? '<span class="priority-label">우선 확인</span>' : ''}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
+      <summary>${lineIcon(group.includes("major") ? "book" : "grid")}${title}${remaining ? `<span class="rec-remaining" title="현재 입력 기준">${remaining}학점 남음</span>` : ''}${priority ? '<span class="priority-label">우선 확인</span>' : ''}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
   });
   const creditReviews = result.credit_reviews.length
     ? `<p class="notice">택1 과목을 모두 이수해 인정학점 확인이 필요합니다. 아래 과목의 학점은 확인 전까지 합계에서 보류했습니다.</p>

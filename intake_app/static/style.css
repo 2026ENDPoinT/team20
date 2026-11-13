@@ -465,18 +465,36 @@ main { view-transition-name: workspace; }
 .weekday-option input:checked + span .line-icon { visibility:visible; }
 .weekday-option input:focus-visible + span { outline:2px solid var(--accent); outline-offset:-3px; }
 
-.rec-list { list-style:none; margin:8px 0 13px; padding:0; }
-.rec-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:start;
-  padding:10px; border-top:1px solid var(--line); }
-.rec-item--required,.rec-item--match { background:var(--paper); box-shadow:inset 2px 0 var(--accent); }
+.rec-list { list-style:none; margin:6px 0 12px; padding:0; }
+.rec-list-entry { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; border-top:1px solid var(--line); }
+.rec-ranked .rec-list-entry { grid-template-columns:2rem minmax(0,1fr); }
+.rec-rank-number { padding:10px 3px; font-weight:750; font-variant-numeric:tabular-nums; color:var(--primary-dark); }
+.rec-entry-courses { min-width:0; }
+.rec-choice-title { margin:7px 0 0; padding:4px 8px; border-left:2px solid var(--line); font-size:13px; color:var(--muted); }
+.rec-choice-title span { margin-inline-start:5px; font-weight:750; color:var(--ink); }
+.rec-item { display:grid; grid-template-columns:minmax(0,1fr) minmax(8rem,24%) 8.75rem;
+  gap:10px; align-items:center; padding:8px 4px 8px 8px; }
+.rec-item + .rec-item { border-top:1px solid var(--line); }
 .rec-item-main small { display:block; color:var(--muted); }
-.rec-item-actions { display:grid; grid-template-columns:auto auto; gap:5px; }
+.rec-item-actions { display:grid; grid-template-columns:minmax(0,1fr) 40px; gap:5px; }
+.rec-item-actions .button { white-space:nowrap; padding-inline:6px; }
 .rec-item-actions small { grid-column:1 / -1; color:var(--muted); text-align:right; }
-.rec-highlight { display:inline-flex; gap:5px; align-items:center; margin-top:4px; padding:2px 6px;
-  background:var(--tint); color:var(--primary-dark); font-size:13px; overflow-wrap:anywhere; }
+.rec-signals { display:flex; gap:2px; align-items:flex-start; flex-direction:column; min-width:0; }
+.rec-highlight { display:inline-flex; gap:5px; align-items:center; max-width:100%; color:var(--primary-dark);
+  font-size:13px; overflow-wrap:anywhere; }
 .rec-highlight .line-icon { flex:none; width:14px; height:14px; }
-.rec-alternatives { padding-left:9px; border-left:2px solid var(--line); margin-top:8px; }
-.rec-alternatives > strong { font-size:14px; color:var(--muted); }
+.rec-score,.rec-remaining { color:var(--muted); font-size:13px; }
+.rec-remaining { font-weight:550; }
+.rec-more > summary { padding-block:8px; border-top:1px solid var(--line); color:var(--primary-dark); font-weight:700; }
+@media(max-width:580px) {
+  .rec-item { grid-template-columns:minmax(0,1fr) minmax(0,8.75rem); gap:7px; padding:8px; }
+  .rec-item .rec-signals { grid-column:1; }
+  .rec-item .rec-item-actions { grid-column:2; grid-row:1 / span 2; }
+}
+@media(max-width:365px) {
+  .rec-item { grid-template-columns:minmax(0,1fr); gap:5px; }
+  .rec-item .rec-item-actions { grid-column:1; grid-row:auto; justify-self:start; }
+}
 #recommendation-results .result-panel > summary > .line-icon { color:var(--accent); flex:none; }
 
 .art-scan { position:absolute; inset:17% 0 auto; height:2px; background:#943f306e; opacity:0; }
@@ -493,13 +511,9 @@ main { view-transition-name: workspace; }
 @media(max-width:580px) {
   #summary-profile { grid-template-columns:1fr; }
   .review-profile { border-right:0; border-bottom:1px solid var(--line); }
-  .rec-item { gap:7px; padding:8px; }
-  .rec-item-actions { grid-column:1; justify-self:start; }
-  .rec-item-actions small { text-align:left; }
 }
 
 .rec-item-main .course-title { font-size:16px; overflow-wrap:anywhere; }
-.rec-item--required .course-title,.rec-item--match .course-title { color:var(--primary-dark); }
 .requirement-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
   gap:8px 16px; margin:14px 0 8px; padding:8px 10px; border-left:2px solid var(--accent); background:var(--paper); }
 .requirement-heading + .requirement-heading { margin-top:10px; }
