@@ -79,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {'error': '로컬 앱에서 접근해주세요.'})
         path = urlsplit(self.path).path
         static = {'/': ('index.html', 'text/html'), '/recommendations': ('index.html', 'text/html'), '/schedules': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        if path in ('/fonts/gowun-batang-bold.woff', '/fonts/noto-sans-kr.woff'):
+            return self.send_bytes(200, (BASE / 'static' / path.lstrip('/')).read_bytes(), 'font/woff')
         if path in static:
             filename, mime = static[path]
             return self.send_bytes(200, (BASE / 'static' / filename).read_bytes(), mime + '; charset=utf-8')

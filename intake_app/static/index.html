@@ -3,23 +3,49 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>수강나침반 · 내 수강 정보</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
 <body>
 <header class="topbar">
+  <div class="reading-progress" aria-hidden="true"></div>
   <div class="topbar-inner">
     <a class="brand" href="/" aria-label="수강나침반 홈"><span class="brand-icon" aria-hidden="true"></span>수강나침반</a>
     <nav class="top-actions" aria-label="주 메뉴">
-      <a id="home-nav" href="/">수강 정보</a>
+      <a id="home-nav" href="/">홈</a>
       <a id="recommend-nav" href="/recommendations" target="_blank" rel="noopener">과목 추천</a>
       <a id="schedule-nav" href="/schedules">시간표 생성</a>
     </nav>
-    <button id="open-basket" class="button secondary" type="button" aria-haspopup="dialog">바구니 <span id="basket-count" class="count">0</span></button>
+    <button id="open-basket" class="button secondary" type="button" aria-haspopup="dialog"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16l-2 11H6L4 9Zm4 0 4-5 4 5"/></svg>바구니 <span id="basket-count" class="count">0</span></button>
     <button id="my-info" class="button secondary" type="button" aria-haspopup="dialog"><span class="profile-icon" aria-hidden="true"></span>내 정보</button>
   </div>
 </header>
 <main>
     <span id="basket-status" class="sr-only" role="status"></span>
-    <section class="page-hero" id="home-panel" hidden>
-      <h1>수강 정보</h1>
-      <p>학생 정보와 이수내역을 확인하세요.</p>
-      <button id="edit-profile" class="button" type="button" aria-haspopup="dialog">수강 정보 입력·수정</button>
+    <section id="home-panel" hidden>
+      <div class="landing">
+        <div class="landing-content">
+          <span class="landing-kicker">서울과학기술대학교 · 컴퓨터공학과</span>
+          <h1>다음 학기, 내게 맞는 시간표를 찾아보세요.</h1>
+          <p>이수한 과목과 관심 분야를 바탕으로 필요한 과목을 찾고, 원하는 조건으로 시간표를 만들어 보세요.</p>
+          <button id="edit-profile" class="button landing-cta" type="button" aria-haspopup="dialog">시작하기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
+        </div>
+        <div class="landing-art" aria-hidden="true">
+          <div class="art-orbit"></div>
+          <div class="art-calendar">
+            <div class="art-calendar-head"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="art-calendar-grid"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="art-scan"></div>
+          </div>
+        </div>
+      </div>
+      <nav class="landing-actions" aria-label="수강 계획 도구">
+        <a href="/recommendations">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5Zm0 12A2.5 2.5 0 0 1 6.5 15H20M9 7h7m-7 4h5"/></svg>
+          <strong>과목 추천</strong>
+          <svg class="landing-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>
+        </a>
+        <a href="/schedules">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v15H4zm0 4h16M8 3v5m8-5v5m-8 6h3m2 0h3m-8 3h3"/></svg>
+          <strong>시간표 생성</strong>
+          <svg class="landing-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>
+        </a>
+      </nav>
     </section>
     <section id="recommendations" aria-labelledby="recommendation-title" hidden>
       <header class="page-hero">
@@ -39,13 +65,27 @@
           <button type="button" id="schedule-basket-tab" role="tab" aria-controls="schedule-course-picker" aria-selected="true">바구니</button>
         </div>
         <div id="schedule-conditions" role="tabpanel" aria-labelledby="schedule-conditions-tab" hidden>
+          <fieldset class="credit-range">
+            <legend>희망 학점 범위</legend>
+            <div class="credit-range-values">
+              <label for="schedule-min">최소 <output id="schedule-min-value" for="schedule-min">15</output>학점</label>
+              <label for="schedule-max">최대 <output id="schedule-max-value" for="schedule-max">18</output>학점</label>
+            </div>
+            <div class="credit-track" id="schedule-credit-track">
+              <svg class="credit-track-line" aria-hidden="true">
+                <rect width="100%" height="100%" class="credit-track-base"/>
+                <rect id="schedule-credit-fill" height="100%" class="credit-track-fill"/>
+              </svg>
+              <input id="schedule-min" type="range" min="1" max="30" step="1" value="15" aria-label="최소 학점">
+              <input id="schedule-max" type="range" min="1" max="30" step="1" value="18" aria-label="최대 학점">
+            </div>
+            <svg class="credit-range-scale" id="schedule-credit-scale" aria-hidden="true"></svg>
+          </fieldset>
           <div class="form-grid">
-            <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
-            <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
             <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">동률이면 수업 요일 적게</option><option value="least_gap">동률이면 수업 사이 빈 시간 적게</option></select></label>
           </div>
           <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
-            <div class="tags" id="schedule-days"></div>
+            <div class="weekday-grid" id="schedule-days"></div>
           </fieldset>
         </div>
         <div id="schedule-course-picker" role="tabpanel" aria-labelledby="schedule-basket-tab" tabindex="0">
@@ -92,8 +132,9 @@
         <button id="return-to-schedule-sections" class="button secondary" type="button" hidden>분반 목록으로</button>
         <p id="schedule-preview-summary" role="status"></p>
         <div id="schedule-calendar" class="schedule-calendar"></div>
+        <div id="schedule-analytics" hidden></div>
         <details id="schedule-offerings" hidden>
-          <summary>분반 상세</summary>
+          <summary><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h1m-1 6h1m-1 6h1"/></svg> 분반 상세</summary>
           <div id="schedule-offering-table" class="table-wrap"></div>
         </details>
       </section>
@@ -154,7 +195,15 @@
       </section>
     </section>
     <section id="step-3" class="step-panel" hidden>
-      <section class="card"><div class="card-title"><div><h2>입력 내용을 확인해주세요</h2></div></div><div id="summary-profile" class="summary-profile"></div><div id="summary-table" class="table-wrap"></div></section>
+      <section class="card review-card" aria-labelledby="review-title">
+        <h2 id="review-title">입력 내용을 확인해주세요</h2>
+        <div id="summary-profile"></div>
+        <section class="review-history" aria-labelledby="review-history-title">
+          <h3 id="review-history-title">이수내역 <span id="review-course-count" class="count"></span></h3>
+          <div id="history-analytics" hidden></div>
+          <div id="summary-table" class="table-wrap"></div>
+        </section>
+      </section>
     </section>
     <footer class="actionbar"><div id="save-state" role="status">불러오는 중</div><div class="button-row"><button id="back" class="button secondary" type="button" hidden>이전</button><button id="next" class="button primary" type="button">다음</button></div></footer>
     </div></dialog>
