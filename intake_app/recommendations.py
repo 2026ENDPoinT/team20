@@ -277,8 +277,7 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                 if not allowed:
                     continue
             group = f'{kind}_credits'
-        reasons = [rules[id]['title'] + (' · 이수내역 확인 필요' if statuses[id] == 'needs_review' else '')
-                   for id in needed]
+        reasons = [rules[id]['title'] for id in needed]
         reasons += [rules[id]['title'] + ' · 인정 여부 확인 필요'
                     for id in review_options[code] if statuses[id] != 'met']
         if group == 'future_major_required':
@@ -318,7 +317,13 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                                    for row in sections])
         if code in alternative_by_code:
             candidate['alternative_group'] = alternative_by_code[code]
-        items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest, code), candidate))
+        # Compare ratings among the same eligibility tier as the representative section.
+        top_rating = max((row['everytime_rating']['score'] for row in sections
+                          if (row['eligibility'] == 'needs_review') == uncertain
+                          and row['everytime_rating'] and row['everytime_rating']['status'] == 'rated'),
+                         default=0) if group.endswith('_credits') else 0
+        items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest,
+                       -top_rating, code), candidate))
     core_areas = {id: codes(rules[id]) for id in ('core_1', 'core_2', 'core_3') if id in rules}
     core_areas.update({f"core_{area['area']}": codes(area) for area in data.get('elective_core_areas', ())})
     area_by_code = {code: area for area, members in core_areas.items() for code in members}

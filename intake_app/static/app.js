@@ -5,11 +5,29 @@ const days = {MON:'월',TUE:'화',WED:'수',THU:'목',FRI:'금',SAT:'토',SUN:'�
 const initial = () => ({kind:'student_input',schema_version:2,student:{department_id:'DEPT_CS',admission_year:null,grade:null,admission_type:'freshman',regular_terms_completed:null,min_credits:null,max_credits:null,interests:[],transfer_recognized_credits:null},history_complete:false,course_attempts:[]});
 let state=initial(), version=0, csrf='', step=1, dirty=false, edits=0, saving=false, importPreview=null, importing=false;
 const draftKey = 'course-compass-input-draft';
+const profileKey = 'course-compass-public-profile';
+let browserStorage = false;
+let importVisitor;
+function readBrowserProfile() {
+  const saved = localStorage.getItem(profileKey);
+  return saved ? JSON.parse(saved) : {version:0, document:null, review_state:'draft', updated_at:null};
+}
+function writeBrowserProfile(expectedVersion, result, reviewed) {
+  const write = () => {
+    if (readBrowserProfile().version !== expectedVersion) {
+      throw Object.assign(new Error('다른 창에서 학생 정보를 저장했어요. 새로고침한 뒤 확인해주세요.'), {status:409});
+    }
+    const saved = {version:expectedVersion + 1, document:result.document,
+      review_state:reviewed ? 'reviewed' : 'draft', updated_at:new Date().toISOString()};
+    localStorage.setItem(profileKey, JSON.stringify(saved));
+    return {...saved, warnings:result.warnings};
+  };
+  return navigator.locks ? navigator.locks.request(profileKey, write) : write();
+}
 const recommendationPage = location.pathname === '/recommendations';
 const schedulePage = location.pathname === '/schedules';
 document.title = (schedulePage ? '시간표 생성' : recommendationPage ? '과목 추천' : '홈') + ' · 수강나침반';
 $(schedulePage ? '#schedule-nav' : recommendationPage ? '#recommend-nav' : '#home-nav').setAttribute('aria-current', 'page');
-if (recommendationPage) $('#recommend-nav').removeAttribute('target');
 let saveTimer, pendingSave, draftConflict = false, loaded = false;
 const fields={'admission-year':'admission_year',grade:'grade',department:'department_id','admission-type':'admission_type','regular-terms':'regular_terms_completed','min-credits':'min_credits','max-credits':'max_credits','transfer-credits':'transfer_recognized_credits'};
 const numeric = new Set(['admission_year','grade','min_credits','max_credits','transfer_recognized_credits','regular_terms_completed']);
@@ -40,7 +58,41 @@ function forgetDraft(savedDocument) {
     }
   } catch { /* Browser storage is optional. */ }
 }
-async function api(path,payload){const options=payload===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':csrf},body:JSON.stringify(payload)};const response=await fetch(path,options);let data;try{data=await response.json();}catch{throw new Error('서버 응답을 읽을 수 없습니다. 서버 실행 상태를 확인해주세요.');}if(!response.ok)throw Object.assign(new Error(data.error||'요청에 실패했습니다.'),{status:response.status});return data;}
+async function requestApi(path, payload, retry = true) {
+  const headers = {'Content-Type':'application/json','X-App-Token':csrf};
+  if (browserStorage && path.startsWith('/api/import/')) {
+    importVisitor ??= crypto.randomUUID();
+    headers['X-Course-Visitor'] = importVisitor;
+  }
+  const options = payload === undefined ? {} : {method:'POST', headers, body:JSON.stringify(payload)};
+  const response = await fetch(path, options);
+  if (browserStorage && payload !== undefined && response.status === 403 && retry) {
+    const config = await requestApi('/api/config');
+    csrf = config.csrf_token;
+    return requestApi(path, payload, false);
+  }
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error('서버 응답을 읽을 수 없습니다. 잠시 뒤 다시 시도해주세요.'); }
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || '요청에 실패했습니다.'), {status:response.status});
+  }
+  return data;
+}
+
+async function api(path, payload) {
+  if (!browserStorage || path === '/api/config') return requestApi(path, payload);
+  const saved = readBrowserProfile();
+  if (path === '/api/input' && payload === undefined) return saved;
+  if (saved.version !== payload.version) {
+    throw Object.assign(new Error('다른 창에서 학생 정보를 저장했어요. 새로고침한 뒤 확인해주세요.'), {status:409});
+  }
+  const result = await requestApi(path, {...payload, document:payload.document ?? saved.document ?? initial()});
+  if (path === '/api/input' || path === '/api/import/apply') {
+    return writeBrowserProfile(saved.version, result, payload.reviewed === true);
+  }
+  return result;
+}
 function fillProfile(){for(const [id,key] of Object.entries(fields))$('#'+id).value=state.student[key]??'';$('#transfer-box').hidden=state.student.admission_type!=='transfer';renderTags();}
 function renderTags() {
   $('#tags').innerHTML = ['전공', '교양'].map(group => `<fieldset class="interest-group">
@@ -417,6 +469,10 @@ async function init() {
   try {
     const config = await api('/api/config');
     csrf = config.csrf_token;
+    browserStorage = config.browser_storage === true;
+    $('#public-data-handling').hidden = !browserStorage;
+    $('#local-data-handling').hidden = browserStorage;
+    $('#browser-storage-notice').hidden = !browserStorage;
     supportsScheduleExclusions = config.schedule_course_exclusions === true;
     tags = config.interest_tags;
     interestAliases = config.interest_aliases;
@@ -566,11 +622,12 @@ $('#apply-import').addEventListener('click', async () => {
 
 const recommendationStatus = {met:'충족', not_met:'미충족', needs_review:'미충족'};
 const majorRequiredGroups = ['current_major_required', 'future_major_required'];
+const generalElectiveLimit = 30;
 const recommendationGroups = [
   ['major_required', '전공필수'],
-  ['required_general', '필수 교양'],
+  ['required_general', '교양필수'],
   ['major_credits', '전공선택'],
-  ['general_credits', '교양'],
+  ['general_credits', '교양선택'],
 ];
 
 function matchesRecommendationGroup(actual, group) {
@@ -626,7 +683,7 @@ async function loadScheduleRecommendations() {
     const [year, semester] = result.target_term.split('-');
     $('#schedule-term').textContent = `${year}년 ${semester}학기`;
     panel.innerHTML = recommendationGroups.map(([group, title]) => {
-      const courses = result.candidates.filter(course => matchesRecommendationGroup(course.group, group));
+      const courses = displayedRecommendationCourses(result.candidates, group);
       const rules = result.requirements.filter(rule =>
         rule.status !== 'met' && matchesRecommendationGroup(rule.recommendation_group, group));
       if (!courses.length && !rules.length) return '';
@@ -662,6 +719,11 @@ function scheduleCourseCard(course, showReason) {
   </div>`;
 }
 
+function displayedRecommendationCourses(candidates, group) {
+  const courses = candidates.filter(course => matchesRecommendationGroup(course.group, group));
+  return group === 'general_credits' ? courses.slice(0, generalElectiveLimit) : courses;
+}
+
 function recommendationEntries(courses) {
   const entries = new Map();
   for (const course of courses) {
@@ -688,20 +750,27 @@ function courseCredits(course) {
   return [...new Set(course.sections.map(section => section.credits ?? '—'))].join(' / ') || '—';
 }
 
-function recommendationCourse(course) {
+function recommendationCourse(course, requirementTitle = '') {
   const matched = course.reasons.find(reason => reason.startsWith('관심 주제 일치'));
-  const reasons = course.reasons.filter(reason => reason !== matched);
-  const unmet = course.requirement_ids.length !== 0;
+  const reasons = course.reasons.filter(reason => reason !== matched && reason !== requirementTitle &&
+    !['전공학점 후보', '교양학점 후보'].includes(reason) && !reason.startsWith('현재 입력 기준'));
   const courseName = esc(course.course_name);
   const grade = course.recommended_grade ? `${course.recommended_grade}학년` : '';
   const meta = [course.course_code, grade, `${courseCredits(course)}학점`].filter(Boolean).join(' · ');
-  return `<li class="rec-item${unmet ? ' rec-item--required' : matched ? ' rec-item--match' : ''}">
+  const scores = course.sections.filter(section =>
+    section.eligibility === course.eligibility && section.everytime_rating?.status === 'rated')
+    .map(section => section.everytime_rating.score).filter(Number.isFinite);
+  const score = scores.length ? Math.max(...scores) : null;
+  return `<div class="rec-item">
     <div class="rec-item-main">
       <strong class="course-title">${courseName}</strong>
       <small>${esc(meta)}</small>
-      ${matched ? `<span class="rec-highlight">${lineIcon('tag')} ${esc(matched)}</span>` : ''}
       ${reasons.length ? `<details class="rec-reasons"><summary>추천 이유</summary>
         <ul>${reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}
+    </div>
+    <div class="rec-signals">
+      ${matched ? `<span class="rec-highlight">${lineIcon('tag')} ${esc(matched.replace(/^관심 주제 일치 · /, ''))}</span>` : ''}
+      <span class="rec-score">${score !== null ? `최고 분반 ★ ${score.toFixed(2)}` : '별점 자료 없음'}</span>
     </div>
     <div class="rec-item-actions">
       <button type="button" class="button secondary" data-view-sections="${esc(course.course_code)}"
@@ -709,14 +778,20 @@ function recommendationCourse(course) {
       <button type="button" class="button secondary basket-add" data-basket-add="${esc(course.course_code)}" data-course-name="${courseName}">+</button>
       ${course.eligibility === 'needs_review' ? '<small>수강 조건 확인</small>' : ''}
     </div>
-  </li>`;
+  </div>`;
 }
 
-function recommendationList(entries) {
-  return `<ul class="rec-list">${entries.map(courses => courses.length > 1
-    ? `<li class="rec-alternatives"><strong>${esc(courses[0].alternative_group.title)} · 택1</strong>
-      <ul class="rec-list">${courses.map(recommendationCourse).join('')}</ul></li>`
-    : recommendationCourse(courses[0])).join('')}</ul>`;
+function recommendationList(entries, startRank = null, requirementTitle = '') {
+  const ranked = startRank !== null;
+  const tag = ranked ? 'ol' : 'ul';
+  return `<${tag} class="rec-list${ranked ? ' rec-ranked' : ''}" role="list"${ranked ? ` start="${startRank}"` : ''}>${entries.map((courses, index) =>
+    `<li class="rec-list-entry">
+      ${ranked ? `<span class="rec-rank-number">${startRank + index}<span class="sr-only">위</span></span>` : ''}
+      <div class="rec-entry-courses">
+        ${courses.length > 1 ? `<div class="rec-choice-title">${esc(courses[0].alternative_group.title)} <span>택1</span></div>` : ''}
+        ${courses.map(course => recommendationCourse(course, requirementTitle)).join('')}
+      </div>
+    </li>`).join('')}</${tag}>`;
 }
 
 let recommendedCourses = new Map();
@@ -855,13 +930,16 @@ function closeScheduleSections(restoreFocus = true) {
 function renderRecommendations(result) {
   const candidates = result.candidates;
   recommendedCourses = new Map(candidates.map(course => [course.course_code, course]));
+  let displayedCount = 0;
   const sections = recommendationGroups.map(([group, title]) => {
-    const rows = candidates.filter(course => matchesRecommendationGroup(course.group, group));
+    const rows = displayedRecommendationCourses(candidates, group);
     const entries = recommendationEntries(rows);
+    displayedCount += entries.length;
     const required = result.requirements.filter(rule =>
       rule.status !== 'met' && matchesRecommendationGroup(rule.recommendation_group, group));
     const creditRule = result.requirements.find(rule => rule.id === group.replace('_credits', ''));
     let content;
+    let remaining = 0;
     const heading = group === 'major_required' ? 'h4' : 'h3';
     const renderRule = rule => {
       const options = rows.filter(course => course.requirement_ids.includes(rule.id));
@@ -879,31 +957,29 @@ function renderRecommendations(result) {
         <div class="requirement-status">
           ${notes.length ? `<span class="requirement-meta">${esc(notes.join(' · '))}</span>` : ''}
           ${availability}</div></div>
-        ${options.length ? recommendationList(options.map(course => [course])) : ''}`;
+        ${options.length ? recommendationList(options.map(course => [course]), null, rule.title) : ''}`;
     };
     if (group === 'major_required') {
       content = renderMajorRequired(required, renderRule);
     } else if (required.length) {
       content = required.map(renderRule).join('');
     } else if (group.endsWith('_credits')) {
-      const main = entries.filter(entry => entry.some(course => !course.lower_grade));
-      const lower = entries.filter(entry => entry.every(course => course.lower_grade));
-      const remaining = creditRule ? Math.max(0, creditRule.target - creditRule.current) : 0;
-      const progress = remaining
-        ? `<p>현재 입력 기준 ${remaining}학점 남음${creditRule.status === 'needs_review' ? ' · 확인 필요' : ''}</p>`
-        : '';
-      content = progress + (main.length ? recommendationList(main) : '') +
-        (lower.length ? `<details><summary>저학년 전공선택 더 보기 · ${lower.length}개</summary>${recommendationList(lower)}</details>` : '') +
-        (!rows.length ? '<p>이번 학기 추천 후보가 없습니다.</p>' : '');
+      const featured = entries.slice(0, 5);
+      const additional = entries.slice(featured.length);
+      remaining = creditRule ? Math.max(0, creditRule.target - creditRule.current) : 0;
+      content = (entries.length ? recommendationList(featured, 1)
+        : '<p>이번 학기 추천 후보가 없습니다.</p>') +
+        (additional.length ? `<details class="rec-more"><summary>다른 후보 ${additional.length}개 보기</summary>
+          ${recommendationList(additional, featured.length + 1)}</details>` : '');
     } else {
       content = '<p>남은 요건이 없습니다.</p>';
     }
     const count = group.endsWith('_credits') ? `후보 ${entries.length}개` : `남은 요건 ${required.length}개`;
-    const priority = (group === 'major_required' && rows.some(course => course.group === majorRequiredGroups[0])) ||
+    const priority = (group === 'major_required' && required.length > 0) ||
       (group === 'required_general' && rows.length > 0 && required.length > 0);
     const open = group === 'major_required' && required.length > 0;
     return `<details class="result-panel${priority ? ' result-panel--priority' : ''}"${open ? ' open' : ''}>
-      <summary>${lineIcon(group.includes("major") ? "book" : "grid")}${title}${priority ? '<span class="priority-label">우선 확인</span>' : ''}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
+      <summary>${lineIcon(group.includes("major") ? "book" : "grid")}${title}${remaining ? `<span class="rec-remaining" title="현재 입력 기준">${remaining}학점 남음</span>` : ''}${priority ? '<span class="priority-label">우선 확인</span>' : ''}<span class="count">${count}</span></summary><div class="result-body">${content}</div></details>`;
   });
   const creditReviews = result.credit_reviews.length
     ? `<p class="notice">택1 과목을 모두 이수해 인정학점 확인이 필요합니다. 아래 과목의 학점은 확인 전까지 합계에서 보류했습니다.</p>
@@ -941,7 +1017,7 @@ function renderRecommendations(result) {
   </section>`;
   const metrics = $('#recommendation-metrics');
   metrics.innerHTML = `<span><strong>${esc(result.target_term)}</strong>추천 학기</span>
-    <span><strong>${recommendationEntries(candidates).length}</strong>추천 후보</span>
+    <span><strong>${displayedCount}</strong>추천 후보</span>
 `;
   metrics.hidden = false;
   $('#recommendation-summary').textContent = '';
@@ -1394,13 +1470,116 @@ function scheduleSpacing(plan) {
   return plan.adjacent_sessions ? "연강 " + plan.adjacent_sessions + "회" : "연강 없음";
 }
 
-function renderCalendar(plan = null, preview = false) {
+function calendarLayout(plan) {
   const entries = (plan?.offerings ?? []).flatMap((offering, color) =>
     offering.meetings.map(meeting => ({...meeting, offering, color: color % 6})));
   const visibleDays = scheduleDays.filter((day, index) => index < 5 ||
     entries.some(meeting => meeting.day === day));
   const first = Math.min(2, ...entries.map(meeting => 2 * Math.floor(meeting.start / 2)));
   const end = Math.max(20, ...entries.map(meeting => 2 * Math.ceil(meeting.end / 2)));
+  return {entries, visibleDays, first, end};
+}
+
+let shareableSchedule = null;
+const scheduleShareButton = $('#share-schedule-image');
+const scheduleShareStatus = $('#schedule-share-status');
+
+function scheduleImageFile(plan) {
+  const {entries, visibleDays, first, end} = calendarLayout(plan);
+  const pad = 24, periodWidth = 48, dayWidth = 168, header = 38, half = 27;
+  const gridTop = 86;
+  const width = pad * 2 + periodWidth + dayWidth * visibleDays.length;
+  const height = gridTop + header + half * (end - first) + pad;
+  const canvas = document.createElement('canvas');
+  canvas.width = width * 2;
+  canvas.height = height * 2;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+  const palette = ['#f3ded4', '#f8ecd3', '#f0e4d4', '#efdee6', '#f7e6e2', '#eae9df'];
+  const text = (value, x, y, size = 14, bold = false) => {
+    ctx.fillStyle = '#2d2328';
+    ctx.font = `${bold ? '700' : '400'} ${size}px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.fillText(value, x, y);
+  };
+  const box = (x, y, w, h, fill) => {
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ddd1c5';
+    ctx.strokeRect(x, y, w, h);
+  };
+  ctx.fillStyle = '#fffcf7';
+  ctx.fillRect(0, 0, width, height);
+  text('주간 시간표', pad, 20, 25, true);
+  text($('#schedule-preview-summary').textContent, pad, 55);
+  box(pad, gridTop, periodWidth, header, '#f8f4ee');
+  text('교시', pad + 8, gridTop + 11);
+  const top = gridTop + header;
+  visibleDays.forEach((day, i) => {
+    const x = pad + periodWidth + i * dayWidth;
+    box(x, gridTop, dayWidth, header, '#f8f4ee');
+    text(day, x + 12, gridTop + 11, 14, true);
+  });
+  for (let tick = first; tick < end; tick += 2) {
+    const y = top + (tick - first) * half;
+    box(pad, y, periodWidth, half * 2, '#f8f4ee');
+    text(String(tick / 2), pad + 12, y + 8);
+    visibleDays.forEach((_, i) => box(pad + periodWidth + i * dayWidth, y, dayWidth, half * 2, '#fffcf7'));
+  }
+  for (const meeting of entries) {
+    const x = pad + periodWidth + visibleDays.indexOf(meeting.day) * dayWidth;
+    const y = top + (meeting.start - first) * half;
+    const h = (meeting.end - meeting.start) * half;
+    box(x + 1, y + 1, dayWidth - 2, h - 2, palette[meeting.color]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + 7, y + 3, dayWidth - 14, h - 6);
+    ctx.clip();
+    ctx.font = '700 14px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+    let line = '', lineY = y + 6;
+    for (const character of meeting.offering.course_name) {
+      if (ctx.measureText(line + character).width > dayWidth - 16) {
+        text(line, x + 8, lineY, 14, true);
+        lineY += 17;
+        line = '';
+      }
+      line += character;
+    }
+    text(line, x + 8, lineY, 14, true);
+    if (lineY + 32 <= y + h) {
+      text([meeting.offering.section_code, meeting.offering.room].filter(Boolean).join(' · '), x + 8, lineY + 18, 12);
+    }
+    ctx.restore();
+  }
+  const binary = atob(canvas.toDataURL('image/png').split(',')[1]);
+  return new File([Uint8Array.from(binary, character => character.charCodeAt(0))], '수강나침반-시간표.png', {type:'image/png'});
+}
+
+scheduleShareButton.addEventListener('click', () => {
+  if (!shareableSchedule) return;
+  scheduleShareStatus.hidden = true;
+  try {
+    const file = scheduleImageFile(shareableSchedule);
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    scheduleShareStatus.textContent = '다운로드 목록에서 시간표 PNG를 확인해주세요.';
+  } catch {
+    scheduleShareStatus.textContent = '시간표 이미지를 만들지 못했어요. 다시 시도해주세요.';
+  }
+  scheduleShareStatus.hidden = false;
+});
+
+function renderCalendar(plan = null, preview = false) {
+  shareableSchedule = !preview && plan?.offerings.length ? plan : null;
+  scheduleShareButton.disabled = !shareableSchedule;
+  scheduleShareStatus.hidden = true;
+  const {entries, visibleDays, first, end} = calendarLayout(plan);
   const rows = [];
   for (let tick = first; tick < end; tick++) {
     const cells = [];
@@ -1453,22 +1632,25 @@ function renderScheduleAnalytics(plan) {
   widget.hidden = !plan;
   if (!plan) return;
   const other = Math.max(0, +(plan.credits - plan.major_credits - plan.general_credits).toFixed(2));
-  const mix = [['전공', plan.major_credits], ['교양', plan.general_credits], ['기타', other]]
-    .filter(([, value]) => value > 0);
+  const mix = [
+    {kind:'major', label:'전공', credits:plan.major_credits},
+    {kind:'general', label:'교양', credits:plan.general_credits},
+    {kind:'other', label:'기타', credits:other},
+  ].filter(part => part.credits > 0);
   const metrics = [['연강', `${plan.adjacent_sessions}회`], ['수업 사이 빈 시간', `${plan.gap_periods}교시`]];
   const ratings = plan.offerings.map(row => row.everytime_rating)
     .filter(rating => rating?.status === 'rated' && Number.isFinite(rating.score));
   if (ratings.length) metrics.push([
-    `에타 평균 · 평가 ${ratings.length}/${plan.offerings.length}분반`,
-    `${(ratings.reduce((sum, rating) => sum + rating.score, 0) / ratings.length).toFixed(2)} / 5`,
+    '에타 평균 별점',
+    `★ ${(ratings.reduce((sum, rating) => sum + rating.score, 0) / ratings.length).toFixed(2)} / 5`,
   ]);
   widget.innerHTML = `<div class="schedule-viz">
     <figure class="viz schedule-mix"><figcaption>학점 구성</figcaption>
-      <svg class="credit-stack" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">${mix.map(([, value], i) => {
-        const start = mix.slice(0, i).reduce((sum, [, credits]) => sum + credits, 0);
-        return `<rect class="credit-part-${i}" x="${1000 * start / plan.credits}" width="${1000 * value / plan.credits}" height="12"/>`;
+      <svg class="credit-stack" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">${mix.map(({kind, credits}, i) => {
+        const start = mix.slice(0, i).reduce((sum, part) => sum + part.credits, 0);
+        return `<rect class="credit-part-${kind}" x="${1000 * start / plan.credits}" width="${1000 * credits / plan.credits}" height="12"/>`;
       }).join('')}</svg>
-      <ul>${mix.map(([label, value], i) => `<li><i class="credit-part-${i}" aria-hidden="true"></i>${label} <strong>${value}학점</strong></li>`).join('')}</ul>
+      <ul>${mix.map(({kind, label, credits}) => `<li><i class="credit-part-${kind}" aria-hidden="true"></i>${label} <strong>${credits}학점</strong></li>`).join('')}</ul>
     </figure>
     <dl class="schedule-numbers">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
   </div>`;
@@ -1516,7 +1698,6 @@ function renderSchedules(result) {
     <span><strong>${plan.credits}학점 · 수업 ${scheduleClassDays(plan).join("·")} (${plan.days}일)</strong>
       <small>${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)}${plan.provisional ? ' · 잠정' : ''}</small></span>
   </button>`).join('');
-  list.scrollTop = 0;
   showSchedule(0);
   list.querySelector('button').focus({preventScroll:true});
 }
@@ -1664,6 +1845,7 @@ $('#schedule-form').addEventListener('submit', async event => {
       locked_offering_ids:basket.filter(row => row.offeringId).map(row => row.offeringId),
       preferred:basket.filter(row => !row.offeringId && row.scheduleMode === 'preferred').map(row => row.code),
       excluded,
+      allow_late_classes:$('#schedule-allow-late').checked,
       blocked_days:[...document.querySelectorAll('[name="blocked-day"]:checked')].map(row => row.value),
       sort:$('#schedule-sort').value,
     });

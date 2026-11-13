@@ -41,6 +41,9 @@ def eligibility(offering, term):
     if offering['day_night'] == '야간':
         return 'excluded', '야간 분반은 주간 과정 추천 대상이 아닙니다.'
 
+    if term == '20262' and offering.get('course_code') == '170001' and offering.get('section_code') == '11001':
+        return 'excluded', 'ST자유전공학부 학생을 대상으로 개설된 분반입니다.'
+
     original_note = (offering.get('note') or '').strip()
     note = clean(original_note)
     if offering['day_night'] == '주간' and not note:
