@@ -8,6 +8,7 @@ import threading
 import unittest
 
 from intake_app.domain import ValidationError, validate_document, document_warnings
+from intake_app.recommendations import recommend
 from intake_app.server import Application
 from everytime_import import collect
 
@@ -81,6 +82,119 @@ class DomainTests(unittest.TestCase):
         result=validate_document(document)
         self.assertEqual(len(result['course_attempts']), 2)
         self.assertTrue(any('동명' in warning for warning in document_warnings(result)))
+
+    def test_recommendation_groups_use_grade_and_keep_future_requirements(self):
+        document = profile()
+        document.update(history_complete=True)
+        document['student'].update(admission_year=2025, grade=3, target_term='2026-2',
+                                   program_type='standard_single_major_day')
+        document = validate_document(document)
+        db = BASE.parent / 'db' / 'courses.sqlite3'
+        result = recommend(db, document)
+        candidates = {row['course_code']: row for row in result['candidates']}
+        order = list(candidates)
+        self.assertEqual(list(dict.fromkeys(row['group'] for row in result['candidates'])), [
+            'current_major_required', 'future_major_required', 'required_general', 'major_credits', 'general_credits',
+        ])
+        self.assertEqual(candidates['109004']['group'], 'current_major_required')
+        self.assertEqual(candidates['109114']['group'], 'future_major_required')
+        self.assertEqual(candidates['109114']['requirement_ids'], ['capstone_2'])
+        self.assertLess(order.index('109078'), order.index('109180'))
+        self.assertTrue(candidates['109180']['lower_grade'])
+        self.assertEqual(candidates['109004']['eligibility'], 'needs_review')
+        self.assertEqual(candidates['100057']['group'], 'required_general')
+        capstone_1 = next(rule for rule in result['requirements'] if rule['id'] == 'capstone_1')
+        self.assertEqual(capstone_1['recommendation_group'], 'future_major_required')
+        self.assertFalse(capstone_1['offered'])
+        document['student']['grade'] = 4
+        result = recommend(db, document)
+        self.assertEqual(next(row['group'] for row in result['candidates'] if row['course_code'] == '109114'),
+                         'current_major_required')
+
+    def test_major_elective_alternatives_use_target_year_and_confirmed_history(self):
+        document = profile()
+        document['student'].update(target_term='2026-2', program_type='standard_single_major_day')
+        db = BASE.parent / 'db' / 'courses.sqlite3'
+
+        def candidates():
+            result = recommend(db, validate_document(document))
+            return {row['course_code']: row for row in result['candidates']}
+
+        offered = candidates()
+        self.assertEqual(offered['109073']['alternative_group'], offered['109829']['alternative_group'])
+        self.assertEqual(offered['109073']['alternative_group']['id'], '109073')
+        self.assertTrue(offered['109834']['sections'])
+        self.assertNotIn('109341', offered)
+        self.assertNotIn('alternative_group', offered['109261'])
+
+        document['course_attempts'] = [
+            dict(id='linear-algebra', course_name='선형대수학', lecture_code='109073-11001', term='2024-2',
+                 completion_status='completed', user_confirmed=True),
+            dict(id='database', course_name='데이터베이스', lecture_code='109341-21001', term='2024-2',
+                 completion_status='completed', user_confirmed=True),
+        ]
+        remaining = candidates()
+        self.assertTrue({'109073', '109829', '109341', '109834'}.isdisjoint(remaining))
+
+        document['student']['target_term'] = '2025-1'
+        general_linear_algebra = candidates()['100591']
+        self.assertEqual(general_linear_algebra['group'], 'general_credits')
+        self.assertNotIn('alternative_group', general_linear_algebra)
+
+        document['course_attempts'] = []
+        document['student'].update(admission_year=2022, target_term='2022-2')
+        self.assertNotIn('alternative_group', candidates()['109073'])
+
+    def test_confirmed_current_alternatives_are_reserved_without_credit(self):
+        document = profile()
+        document['student'].update(target_term='2026-2', program_type='standard_single_major_day')
+        document['history_complete'] = True
+        db = BASE.parent / 'db' / 'courses.sqlite3'
+        result = recommend(db, validate_document(document))
+        candidates = {row['course_code']: row for row in result['candidates']}
+        self.assertEqual(candidates['109004']['alternative_group']['id'], 'programming_2')
+
+        for code in ('109073', '109004'):
+            candidate = candidates[code]
+            document['course_attempts'].append(dict(
+                id=code, course_name=candidate['course_name'], term='2026-2',
+                lecture_code=f"{code}-{candidate['sections'][0]['section_code']}",
+                completion_status='in_progress', user_confirmed=True,
+            ))
+
+        result = recommend(db, validate_document(document))
+        remaining = {row['course_code'] for row in result['candidates']}
+        self.assertFalse({'109073', '109829', '109004', '109417'} & remaining)
+        requirements = {rule['id']: rule for rule in result['requirements']}
+        self.assertTrue(requirements['programming_2']['in_progress'])
+        self.assertNotEqual(requirements['programming_2']['status'], 'met')
+        self.assertEqual(requirements['major']['current'], 0)
+        self.assertEqual(result['credit_reviews'], [])
+
+        document['course_attempts'][0]['lecture_code'] = '109073-99999'
+        result = recommend(db, validate_document(document))
+        self.assertIn('109829', {row['course_code'] for row in result['candidates']})
+
+    def test_duplicate_elective_credit_needs_review(self):
+        document = profile()
+        document['student'].update(admission_year=2022, target_term='2026-2',
+                                   program_type='standard_single_major_day')
+        document['history_complete'] = True
+        document['course_attempts'] = [
+            dict(id='linear-algebra-ko', course_name='선형대수학', lecture_code='109073-11001',
+                 term='2022-2', completion_status='completed', user_confirmed=True),
+            dict(id='linear-algebra-en', course_name='Linear Algebra', lecture_code='109829-11001',
+                 term='2023-2', completion_status='completed', user_confirmed=True),
+        ]
+        result = recommend(BASE.parent / 'db' / 'courses.sqlite3', validate_document(document))
+        self.assertEqual(result['credit_reviews'], [
+            {'title': '선형대수학', 'course_codes': ['109073', '109829']},
+        ])
+        requirements = {rule['id']: rule for rule in result['requirements']}
+        for id in ('total', 'major'):
+            self.assertEqual(requirements[id]['current'], 0)
+            self.assertEqual(requirements[id]['status'], 'needs_review')
+        self.assertTrue(result['partial'])
 
 class StorageAndHttpTests(unittest.TestCase):
     @classmethod

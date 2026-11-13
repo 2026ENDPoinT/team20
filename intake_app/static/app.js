@@ -9,7 +9,7 @@ const fields={'admission-year':'admission_year',grade:'grade',department:'depart
 const numeric = new Set(['admission_year','grade','min_credits','max_credits','transfer_recognized_credits','regular_terms_completed']);
 const tags=['인공지능','경제·금융','심리','예술·문화','사회·정치','역사','과학기술','철학·윤리','창업','글쓰기'];
 function message(text,type='info'){$('#message').textContent=text;$('#message').className='message '+type;$('#message').hidden=false;}
-function touch(){clearImportPreview();clearComparison();dirty=true;edits++;$('#save-state').textContent='저장하지 않은 변경사항이 있어요';}
+function touch(){clearImportPreview();clearComparison();clearRecommendations();dirty=true;edits++;$('#save-state').textContent='저장하지 않은 변경사항이 있어요';}
 async function api(path,payload){const options=payload===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':csrf},body:JSON.stringify(payload)};const response=await fetch(path,options);let data;try{data=await response.json();}catch{throw new Error('서버 응답을 읽을 수 없습니다. 서버 실행 상태를 확인해주세요.');}if(!response.ok)throw new Error(data.error||'요청에 실패했습니다.');return data;}
 function fillProfile(){for(const [id,key] of Object.entries(fields))$('#'+id).value=state.student[key]??'';$('#history-complete').checked=state.history_complete;$('#transfer-box').hidden=state.student.admission_type!=='transfer';renderTags();}
 function renderTags(){const all=[...new Set([...tags,...state.student.interests])];$('#tags').innerHTML=all.map(tag=>`<button class="tag ${state.student.interests.includes(tag)?'selected':''}" aria-pressed="${state.student.interests.includes(tag)}" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('');}
@@ -108,7 +108,7 @@ function renderSummary(){
  const warnings=[];if(!state.history_complete)warnings.push('일부 수강 내역만 입력한 상태입니다.');if(done.length<courses.length)warnings.push(`${courses.length-done.length}개 과목의 이름·학기·이수 상태를 검토해주세요.`);if(courses.some(c=>c.source==='sample'))warnings.push('예시 과목이 포함되어 있습니다. 본인의 이수 내역인지 확인해주세요.');
  $('#review-warnings').innerHTML=warnings.map(w=>`<p class="notice">${esc(w)}</p>`).join('');
 }
-async function save(reviewed=false){if(saving||importing)return;clearImportPreview();clearComparison();saving=true;$('#save').disabled=true;$('#next').disabled=true;const start=edits;try{const result=await api('/api/input',{document:state,version,reviewed});version=result.version;if(edits===start){state=result.document;dirty=false;fillProfile();renderCourses();if(step===3)renderSummary();$('#save-state').textContent=(reviewed?'확인 완료 · ':'임시 저장 · ')+new Date(result.updated_at).toLocaleTimeString('ko-KR');}else $('#save-state').textContent='저장 중 추가 변경이 있어요. 한 번 더 저장해주세요.';message((reviewed?'입력 확인을 완료하고 저장했습니다.':'임시 저장했습니다.')+(result.warnings.length?' '+result.warnings.join(' '):''),'success');}catch(error){message(error.message,'error');}finally{saving=false;$('#save').disabled=false;$('#next').disabled=false;}}
+async function save(reviewed=false){if(saving||importing)return;clearImportPreview();clearComparison();clearRecommendations();saving=true;$('#save').disabled=true;$('#next').disabled=true;const start=edits;try{const result=await api('/api/input',{document:state,version,reviewed});version=result.version;if(edits===start){state=result.document;dirty=false;fillProfile();renderCourses();if(step===3)renderSummary();$('#save-state').textContent=(reviewed?'확인 완료 · ':'임시 저장 · ')+new Date(result.updated_at).toLocaleTimeString('ko-KR');}else $('#save-state').textContent='저장 중 추가 변경이 있어요. 한 번 더 저장해주세요.';message((reviewed?'입력 확인을 완료하고 저장했습니다.':'임시 저장했습니다.')+(result.warnings.length?' '+result.warnings.join(' '):''),'success');}catch(error){message(error.message,'error');}finally{saving=false;$('#save').disabled=false;$('#next').disabled=false;}}
 function addManual() {
   editingCourseId = crypto.randomUUID();
   state.course_attempts.push({
@@ -262,6 +262,11 @@ function clearComparison() {
   $('#comparison-table').replaceChildren();
 }
 
+function clearRecommendations() {
+  $('#recommendation-summary').textContent = '';
+  $('#recommendation-results').replaceChildren();
+}
+
 const importActions = {add:'추가', update:'변경', unchanged:'이미 가져옴', review:'직접 확인 필요'};
 const importFields = {term:'학기',lecture_code:'강좌코드',course_name:'과목명',professor:'교수명'};
 
@@ -348,6 +353,7 @@ $('#apply-import').addEventListener('click', async () => {
     $('#save-state').textContent = '가져온 과목을 임시 저장했어요';
     clearImportPreview();
     clearComparison();
+    clearRecommendations();
     renderCourses();
     if (step === 3) renderSummary();
     message(`${adds.length}건 추가 · ${updates.length}건 갱신. 이수 완료한 과목을 선택해 한 번에 확인할 수 있습니다.`, 'success');
@@ -397,6 +403,121 @@ $('#compare-offerings').addEventListener('click', async () => {
       }).join('')}</tbody></table>` : '';
   } catch (error) {
     message(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+const recommendationStatus = {met:'충족', not_met:'미충족', needs_review:'확인 필요'};
+const recommendationGroups = [
+  ['current_major_required', '이번에 챙길 전공필수'],
+  ['future_major_required', '다음 전공필수'],
+  ['required_general', '필수 교양'],
+  ['major_credits', '전공선택'],
+  ['general_credits', '교양'],
+];
+
+function recommendationEntries(courses) {
+  const entries = new Map();
+  for (const course of courses) {
+    const key = course.alternative_group ? `alternative-${course.alternative_group.id}` : course.course_code;
+    if (!entries.has(key)) entries.set(key, []);
+    entries.get(key).push(course);
+  }
+  return Array.from(entries.values());
+}
+
+function recommendationTable(entries) {
+  return `<div class="table-wrap"><table><thead><tr><th>과목</th><th>편성 학년</th><th>추천 이유</th><th>분반</th></tr></thead>
+    ${entries.map(courses => `<tbody>
+      ${courses.length > 1 ? `<tr><th colspan="4" scope="rowgroup">${esc(courses[0].alternative_group.title)} · 택1</th></tr>` : ''}
+      ${courses.map(course => `<tr><td>${esc(course.course_name)}<small>${esc(course.course_code)}</small></td>
+      <td>${course.recommended_grade ?? '—'}</td><td>${course.reasons.map(esc).join('<br>')}</td>
+      <td><details><summary>${course.sections.length}개${course.eligibility==='needs_review'?' · 수강제한 확인 필요':''}</summary>
+      ${course.sections.map(section => `<small>${esc(section.section_code)} · ${esc(section.professor || '교수 미정')} · ${esc(section.credits ?? '—')}학점${section.eligibility==='needs_review'?' · 제한 확인 필요':''}</small>`).join('')}
+      </details></td></tr>`).join('')}
+    </tbody>`).join('')}
+  </table></div>`;
+}
+
+function renderRecommendations(result) {
+  const candidates = result.candidates;
+  const sections = recommendationGroups.map(([group, title]) => {
+    const rows = candidates.filter(course => course.group === group);
+    const entries = recommendationEntries(rows);
+    const required = result.requirements.filter(rule => rule.recommendation_group === group && rule.status !== 'met');
+    const creditRule = result.requirements.find(rule => rule.id === group.replace('_credits', ''));
+    let content;
+    if (required.length) {
+      content = required.map(rule => {
+        const options = rows.filter(course => course.requirement_ids.includes(rule.id));
+        const notes = [
+          rule.recommended_grade ? `${rule.recommended_grade}학년` : '',
+          rule.type === 'choose_n' ? `택${rule.target}` : '',
+          rule.type === 'min_group_credits' ? `현재 입력 기준 ${Math.max(0, rule.target - rule.current)}학점 남음` : '',
+          rule.in_progress ? '수강 중인 과목 있음' : '',
+          rule.status === 'needs_review' ? '확인 필요' : '',
+        ].filter(Boolean);
+        return `<h4>${esc(rule.title)}${notes.length ? ` · ${esc(notes.join(' · '))}` : ''}</h4>
+          ${options.length ? recommendationTable(options.map(course => [course])) : `<p>이번 학기 ${rule.offered ? '추천 후보가' : '개설 과목이'} 없습니다.</p>`}`;
+      }).join('');
+    } else if (group.endsWith('_credits')) {
+      const main = entries.filter(entry => entry.some(course => !course.lower_grade));
+      const lower = entries.filter(entry => entry.every(course => course.lower_grade));
+      const remaining = creditRule ? Math.max(0, creditRule.target - creditRule.current) : 0;
+      const progress = remaining
+        ? `<p>현재 입력 기준 ${remaining}학점 남음${creditRule.status === 'needs_review' ? ' · 확인 필요' : ''}</p>`
+        : '';
+      content = progress + (main.length ? recommendationTable(main) : '') +
+        (lower.length ? `<details><summary>저학년 전공선택 더 보기 · ${lower.length}개</summary>${recommendationTable(lower)}</details>` : '') +
+        (!rows.length ? '<p>이번 학기 추천 후보가 없습니다.</p>' : '');
+    } else {
+      content = '<p>남은 요건이 없습니다.</p>';
+    }
+    const count = group.endsWith('_credits') ? `후보 ${entries.length}개` : `남은 요건 ${required.length}개`;
+    return `<details class="recommendation-group"><summary>${title} · ${count}</summary>${content}</details>`;
+  });
+  const creditReviews = result.credit_reviews.length
+    ? `<p class="notice">택1 과목을 모두 이수해 인정학점 확인이 필요합니다. 아래 과목의 학점은 확인 전까지 합계에서 보류했습니다.</p>
+      <ul>${result.credit_reviews.map(review => `<li>${esc(review.title)} (${esc(review.course_codes.join(' / '))})</li>`).join('')}</ul>`
+    : '';
+  const checks = `<details class="recommendation-group" open><summary>학번별 요건</summary>${creditReviews}<div class="table-wrap"><table>
+    <thead><tr><th>요건</th><th>상태</th><th>확인한 값 / 기준</th></tr></thead><tbody>
+    ${result.requirements.map(rule => `<tr><td>${esc(rule.title)}</td>
+      <td>${recommendationStatus[rule.status]}</td><td>${esc(rule.current ?? '—')} / ${esc(rule.target)}</td></tr>`).join('')}
+    </tbody></table></div></details>`;
+  $('#recommendation-summary').textContent = `${result.target_term} · 후보 ${recommendationEntries(candidates).length}개` +
+    (result.partial ? ' · 확인된 이수·학점을 바탕으로 계산했습니다. 일부 요건은 확인이 필요합니다.' : '');
+  const results = $('#recommendation-results');
+  results.innerHTML = '<button type="button" class="button secondary">모두 접기</button>' + checks + sections.join('');
+  const panels = Array.from(results.querySelectorAll(':scope > details'));
+  const toggle = results.querySelector('button');
+  function updateToggleLabel() {
+    toggle.textContent = panels.some(panel => panel.open) ? '모두 접기' : '모두 펼치기';
+  }
+  panels.forEach(panel => panel.addEventListener('toggle', updateToggleLabel));
+  toggle.addEventListener('click', () => {
+    const open = panels.every(panel => !panel.open);
+    panels.forEach(panel => { panel.open = open; });
+    updateToggleLabel();
+  });
+}
+
+$('#recommend-nav').addEventListener('click', () => {
+  switchStep(3);
+  $('#recommendations').scrollIntoView({block:'start'});
+});
+$('#run-recommendations').addEventListener('click', async () => {
+  if (dirty || saving || importing || !version) return message('학생 정보와 이수내역을 저장해주세요.', 'error');
+  const button = $('#run-recommendations');
+  button.disabled = true;
+  clearRecommendations();
+  const start = edits;
+  try {
+    const result = await api('/api/recommendations', {version});
+    if (edits === start && result.input_revision === version && !dirty) renderRecommendations(result);
+  } catch (error) {
+    $('#recommendation-summary').textContent = error.message;
   } finally {
     button.disabled = false;
   }

@@ -14,6 +14,7 @@ from everytime_import.importer import ImportFailure, collect
 from .domain import ValidationError, ensure, validate_document, document_warnings
 from .imports import apply_import, check_import_sources, prepare_import
 from .offerings import compare_offerings
+from .recommendations import recommend
 from .store import Store, ConflictError
 
 BASE = Path(__file__).resolve().parent
@@ -84,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed() or not secrets.compare_digest(self.headers.get('X-App-Token', ''), self.server.token):
             return self.respond(403, {'error': '앱을 새로고침한 뒤 다시 시도해주세요.'})
         path = urlsplit(self.path).path
-        if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare'):
+        if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare', '/api/recommendations'):
             return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
         try:
             self.connection.settimeout(110)
@@ -101,6 +102,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.commit_import(value, version)
             if path == '/api/offerings/compare':
                 return self.compare_saved(version)
+            if path == '/api/recommendations':
+                saved = self.load_version(version)
+                ensure(saved['document'] is not None, '학생 정보와 이수내역을 먼저 저장해주세요.')
+                result = recommend(self.server.official_db, validate_document(saved['document']))
+                self.load_version(version)
+                return self.respond(200, dict(result, input_revision=version))
             final = value.get('reviewed', False)
             ensure(type(final) is bool, '입력 확인 상태 오류')
             document = validate_document(value.get('document'), final=final)
