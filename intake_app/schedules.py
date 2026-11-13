@@ -134,7 +134,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     ensure(isinstance(sort, str) and sort in SORTS, "정렬 기준을 확인해주세요.")
 
     document = dict(document, student=dict(student, target_term=None, recognition_notes=""))
-    result, pool, alternatives, deficits = recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+    result, pool, alternatives, deficits, restricted = recommend(
+        database, document, schedule_context=True, ratings_db=ratings_db)
     candidates = {row["course_code"]: row for row in result["candidates"]}
     rules = {rule["id"]: rule for rule in result["requirements"]}
     buckets = ("major", "general")
@@ -176,6 +177,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
                  section_code=section["section_code"], professor=section["professor"], credits=credits,
                  schedule=section["schedule"], room=section["room"], meetings=meetings,
                  category=section["category"], eligibility=section["eligibility"],
+                 eligibility_reason=section["eligibility_reason"],
                  recommended_grade=level, core_area=section.get("core_area"),
                  everytime_rating=section["everytime_rating"]),
             int(Decimal(str(credits)) * 100), mask,
@@ -187,6 +189,13 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         ))
 
     response = dict(target_term=result["target_term"], snapshot=result["snapshot"], candidates=[], issues=[])
+    restricted_locks = locked & restricted.keys()
+    if restricted_locks:
+        for offering_id in sorted(restricted_locks):
+            section = restricted[offering_id]
+            response["issues"].append(
+                f"고정 분반 {section['course_code']}-{section['section_code']} 수강 불가 ({section['reason']})")
+        return dict(response, outcome="no_feasible_plan", search_status="complete")
     available_ids = {option.section["offering_id"] for items in options.values() for option in items}
     if locked - available_ids:
         response["issues"] = ["고정한 분반의 시간, 학점, 개설 여부 또는 수강 조건을 확인해주세요."]
@@ -201,7 +210,16 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             options[code] = fixed
     missing = required - options.keys()
     if missing:
-        response["issues"] = [f"필수 과목 {code}의 편성 가능한 분반이 없습니다." for code in sorted(missing)]
+        pool_codes = {section["course_code"] for section in pool}
+        restrictions_by_code = defaultdict(set)
+        for section in restricted.values():
+            restrictions_by_code[section["course_code"]].add(section["reason"])
+        for code in sorted(missing):
+            reasons = restrictions_by_code.get(code)
+            if reasons and code not in pool_codes:
+                response["issues"].append(f"필수 과목 {code}의 분반은 수강 대상에서 제외됩니다. {' / '.join(sorted(reasons))}")
+            else:
+                response["issues"].append(f"필수 과목 {code}의 편성 가능한 분반이 없습니다.")
         return dict(response, outcome="undetermined" if missing & unknown_times else "no_feasible_plan",
                     search_status="complete")
     groups = [options[code][0].group for code in required]

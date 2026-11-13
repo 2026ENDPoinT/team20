@@ -9,6 +9,7 @@ import unittest
 
 from intake_app.domain import ValidationError, validate_document, document_warnings
 from intake_app.recommendations import recommend
+from intake_app.schedules import generate
 from intake_app.server import Application
 from everytime_import import collect
 
@@ -110,6 +111,31 @@ class DomainTests(unittest.TestCase):
         result = recommend(db, document)
         self.assertEqual(next(row['group'] for row in result['candidates'] if row['course_code'] == '109114'),
                          'current_major_required')
+
+    def test_official_registration_limits_apply_to_recommendations_and_schedules(self):
+        document = profile()
+        document['student'].update(target_term='2026-2', grade=3)
+        document = validate_document(document)
+        db = BASE.parent / 'db' / 'courses.sqlite3'
+        result = recommend(db, document)
+        courses = {row['course_code']: row for row in result['candidates']}
+        physics = {row['section_code']: row for row in courses['101068']['sections']}
+        self.assertNotIn('11003', physics)
+        self.assertEqual(physics['11009']['eligibility'], 'no_restriction_recorded')
+        self.assertEqual(physics['11001']['eligibility'], 'needs_review')
+        self.assertNotIn('100453', courses)
+
+        request = dict(min_credits=2, max_credits=2)
+        blocked = generate(db, document, dict(request, locked_offering_ids=['20262:101068:11003:00500001']))
+        self.assertEqual(blocked['outcome'], 'no_feasible_plan')
+        self.assertEqual(blocked['candidates'], [])
+        self.assertIn('공과대학', blocked['issues'][0])
+        allowed = generate(db, document, dict(request, locked_offering_ids=['20262:101068:11009:00500001']))
+        self.assertIn('정보통신대학', allowed['candidates'][0]['offerings'][0]['eligibility_reason'])
+        required = generate(db, document, dict(request, required=['100453']))
+        self.assertEqual(required['outcome'], 'no_feasible_plan')
+        self.assertIn('100453', required['issues'][0])
+        self.assertIn('수강 대상에서 제외', required['issues'][0])
 
     def test_major_elective_alternatives_use_target_year_and_confirmed_history(self):
         document = profile()

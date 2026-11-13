@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .domain import ensure
+from .eligibility import eligibility
 from .interest_tags import OTHER, classify, load_tags
 from .offerings import everytime_ratings, normalized_name, recommendation_data, school_term
 
@@ -167,17 +168,6 @@ def evaluate(data, document, matches, elective_groups):
             sports_credits >= sports_rule['max'])
 
 
-def eligibility(offering):
-    if offering['day_night'] == '야간':
-        return 'excluded'
-    flags = offering['school_flags']
-    # Public fields omit the actual allow-list and registration phase.
-    if offering['day_night'] == '주간' and flags.get('other_department_restricted') == 'N' and not (
-            offering['note'] or offering['details']):
-        return 'no_restriction_recorded'
-    return 'needs_review'
-
-
 def recommend(database, document, *, schedule_context=False, ratings_db=None):
     student = document['student']
     if student.get('program_type') is None:
@@ -243,6 +233,7 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
     groups_by_rule = {result['id']: result['recommendation_group'] for result in results
                       if 'recommendation_group' in result}
     by_code = defaultdict(list)
+    restricted_sections = {}
     excluded = exclusion_map(data)
     review_options = defaultdict(list)
     for review in data['pending_reviews']:
@@ -253,10 +244,13 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
         code = offering['course_code']
         if code in blocked or 'total' in excluded[code] or (sports_full and is_sport(offering)):
             continue
-        state = eligibility(offering)
-        if state != 'excluded':
-            by_code[code].append(dict(offering, eligibility=state,
-                                      everytime_rating=ratings.get(offering['offering_id'])))
+        state, reason = eligibility(offering, target['term'])
+        if state == 'excluded':
+            restricted_sections[offering['offering_id']] = dict(
+                course_code=code, section_code=offering['section_code'], reason=reason)
+            continue
+        by_code[code].append(dict(offering, eligibility=state, eligibility_reason=reason,
+                                  everytime_rating=ratings.get(offering['offering_id'])))
     tags, by_label, by_course = load_tags()
     interests = {normalized_name(tag) for tag in student.get('interests', []) if normalized_name(tag)}
     selected = set().union(*(by_label.get(tag, set()) for tag in interests))
@@ -319,7 +313,7 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                                        or ([OTHER] if OTHER in course_tags else []),
                          eligibility='needs_review' if uncertain else 'no_restriction_recorded',
                          sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits',
-                                                               'eligibility','everytime_rating')}
+                                                               'eligibility','eligibility_reason','everytime_rating')}
                                    for row in sections])
         if code in alternative_by_code:
             candidate['alternative_group'] = alternative_by_code[code]
@@ -340,5 +334,5 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                  core_area=area_by_code.get(code), core_area_occupied=area_by_code.get(code) in occupied_areas)
             for code, sections in by_code.items() for section in sections
         ]
-        return response, pool, alternative_by_code, deficits
+        return response, pool, alternative_by_code, deficits, restricted_sections
     return response
