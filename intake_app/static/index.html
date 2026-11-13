@@ -30,14 +30,21 @@
       <div id="recommendation-results"></div>
     </section>
     <section id="schedule-panel" hidden aria-labelledby="schedule-title">
-      <header class="page-hero"><h1 id="schedule-title">시간표 생성</h1><p>학점과 등교 조건에 맞는 분반 조합을 찾아요.</p></header>
+      <header class="schedule-heading"><h1 id="schedule-title">시간표 만들기</h1><span id="schedule-term"></span></header>
       <div class="schedule-workspace">
       <div class="schedule-controls">
       <form id="schedule-form" class="card schedule-form">
-        <fieldset class="interest-group"><legend>과목 바구니 <span id="schedule-basket-count" class="count">0</span></legend>
-          <p class="field-hint">과목은 필수 또는 선호로 지정할 수 있어요. 담은 분반은 고정돼요.</p>
-          <div id="schedule-basket-list"></div>
-        </fieldset>
+        <h2 id="schedule-picker-title">추천 과목</h2>
+        <div class="schedule-picker-body">
+          <div id="schedule-recommendations"></div>
+        </div>
+        <section id="schedule-section-picker" role="dialog" hidden aria-labelledby="schedule-section-title">
+          <div class="schedule-section-header"><h3 id="schedule-section-title"></h3><button type="button" class="button secondary" id="close-schedule-sections">닫기</button></div>
+          <div id="schedule-section-list"></div>
+        </section>
+        <p id="schedule-section-error" class="field-hint" role="status" hidden></p>
+        <details id="schedule-conditions" class="schedule-conditions">
+        <summary>생성 조건</summary>
         <div class="form-grid">
           <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
           <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
@@ -48,6 +55,7 @@
         </fieldset>
         <details class="schedule-options"><summary>고정 분반</summary>
           <label>고정할 분반 ID<input id="schedule-locks" placeholder="후보에서 분반 고정 버튼을 누르세요"></label>
+        </details>
         </details>
         <button class="button primary" id="generate-schedule" type="submit">시간표 생성</button>
       </form>
@@ -61,8 +69,13 @@
       </section>
       </div>
       <section class="card schedule-preview" aria-labelledby="schedule-preview-title">
+        <section id="schedule-selection" aria-labelledby="schedule-selection-title">
+          <h2 id="schedule-selection-title">선택 과목 <span id="schedule-basket-count" class="count">0</span></h2>
+          <div id="schedule-basket-list"></div>
+        </section>
         <h2 id="schedule-preview-title">주간 시간표</h2>
-        <p id="schedule-preview-summary" role="status">시간표를 생성하면 여기에 표시돼요.</p>
+        <button id="return-to-schedule-sections" class="button secondary" type="button" hidden>분반 목록으로</button>
+        <p id="schedule-preview-summary" role="status"></p>
         <div id="schedule-calendar" class="schedule-calendar"></div>
         <details id="schedule-offerings" hidden>
           <summary>분반 상세</summary>

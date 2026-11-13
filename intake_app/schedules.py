@@ -246,6 +246,11 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     if len(set(required_areas)) != len(required_areas):
         response["issues"] = ["같은 핵심교양 영역에서 둘 이상 필수 과목으로 지정했습니다."]
         return dict(response, outcome="no_feasible_plan", search_status="complete")
+    selection_groups = {code: set(groups) for code, groups in result["selection_groups"].items()}
+    required_groups = [group for code in required for group in selection_groups.get(code, ())]
+    if len(set(required_groups)) != len(required_groups):
+        response["issues"] = ["같은 택1 요건에서 둘 이상 필수 과목으로 지정했습니다."]
+        return dict(response, outcome="no_feasible_plan", search_status="complete")
     # Explore both elective buckets early, even when one has many more offerings.
     elective_codes = {
         bucket: sorted(
@@ -275,7 +280,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     truncated = False
     chosen = []
     used = set()
-    used_areas = set()
+    used_selection_groups = set()
     low, high = lower * 100, upper * 100
     max_required = len(required)
 
@@ -338,17 +343,16 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         for position in range(index, len(keys)):
             if truncated or units + remaining[position] < low:
                 return
+            groups = selection_groups.get(keys[position], ())
             for item in options[keys[position]]:
                 if (units + item.units > high or mask & item.mask or item.group in used
-                        or item.core_area in used_areas):
+                        or not used_selection_groups.isdisjoint(groups)):
                     continue
                 chosen.append(item)
                 used.add(item.group)
-                if item.core_area:
-                    used_areas.add(item.core_area)
+                used_selection_groups.update(groups)
                 search(position + 1, mask | item.mask, units + item.units)
-                if item.core_area:
-                    used_areas.remove(item.core_area)
+                used_selection_groups.difference_update(groups)
                 used.remove(item.group)
                 chosen.pop()
                 if truncated:
