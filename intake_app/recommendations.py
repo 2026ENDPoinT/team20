@@ -313,7 +313,8 @@ def recommend(database, document, *, schedule_context=False, ratings_db=None):
                                        or ([OTHER] if OTHER in course_tags else []),
                          eligibility='needs_review' if uncertain else 'no_restriction_recorded',
                          sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits',
-                                                               'eligibility','eligibility_reason','everytime_rating')}
+                                                               'schedule','eligibility','eligibility_reason',
+                                                               'everytime_rating')}
                                    for row in sections])
         if code in alternative_by_code:
             candidate['alternative_group'] = alternative_by_code[code]

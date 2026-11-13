@@ -110,6 +110,22 @@ def request_codes(value, field):
     return set(entries)
 
 
+def basket_sections(database, document, request, *, ratings_db=None):
+    codes = request_codes(request, "courses")
+    document = dict(document, student=dict(document["student"], target_term=None, recognition_notes=""))
+    result, pool, _, _, _ = recommend(database, document, schedule_context=True, ratings_db=ratings_db)
+    courses = {}
+    for row in pool:
+        code = row["course_code"]
+        if code not in codes:
+            continue
+        course = courses.setdefault(code, dict(course_code=code, course_name=row["course_name"], sections=[]))
+        fields = ("offering_id", "section_code", "professor", "schedule", "credits", "category",
+                  "eligibility", "eligibility_reason", "everytime_rating")
+        course["sections"].append(dict({key: row[key] for key in fields}, meetings=parse_meetings(row["schedule"])))
+    return dict(target_term=result["target_term"], courses=courses)
+
+
 def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None):
     student = document["student"]
     lower = request.get("min_credits")

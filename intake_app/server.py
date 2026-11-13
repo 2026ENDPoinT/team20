@@ -15,7 +15,7 @@ from .domain import ValidationError, ensure, validate_document, document_warning
 from .imports import apply_import, check_import_sources, prepare_import, replace_import
 from .offerings import compare_offerings
 from .recommendations import recommend
-from .schedules import generate
+from .schedules import basket_sections, generate
 from .interest_tags import load_tags
 from .store import Store, ConflictError
 
@@ -95,7 +95,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed() or not secrets.compare_digest(self.headers.get('X-App-Token', ''), self.server.token):
             return self.respond(403, {'error': '앱을 새로고침한 뒤 다시 시도해주세요.'})
         path = urlsplit(self.path).path
-        if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare', '/api/recommendations', '/api/schedules'):
+        if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare',
+                        '/api/recommendations', '/api/schedules', '/api/schedules/sections'):
             return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
         try:
             self.connection.settimeout(110)
@@ -112,11 +113,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.commit_import(value, version)
             if path == '/api/offerings/compare':
                 return self.compare_saved(version)
-            if path == '/api/schedules':
+            if path in ('/api/schedules', '/api/schedules/sections'):
                 saved = self.load_version(version)
                 ensure(saved['document'] is not None, '내 정보에서 학생 정보를 먼저 저장해주세요.')
-                result = generate(self.server.official_db, validate_document(saved['document']), value,
-                                  ratings_db=self.server.ratings_db)
+                action = basket_sections if path.endswith('/sections') else generate
+                result = action(self.server.official_db, validate_document(saved['document']), value,
+                                ratings_db=self.server.ratings_db)
                 self.load_version(version)
                 return self.respond(200, dict(result, input_revision=version))
             if path == '/api/recommendations':

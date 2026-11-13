@@ -35,7 +35,7 @@
       <div class="schedule-controls">
       <form id="schedule-form" class="card schedule-form">
         <fieldset class="interest-group"><legend>과목 바구니 <span id="schedule-basket-count" class="count">0</span></legend>
-          <p class="field-hint">담은 과목을 필수 포함 또는 선호로 사용할 수 있어요.</p>
+          <p class="field-hint">과목은 필수 또는 선호로 지정할 수 있어요. 담은 분반은 고정돼요.</p>
           <div id="schedule-basket-list"></div>
         </fieldset>
         <div class="form-grid">
@@ -74,6 +74,11 @@
     <dialog id="basket-dialog" aria-labelledby="basket-title">
       <header class="dialog-header"><h2 id="basket-title">과목 바구니</h2><form method="dialog"><button class="button secondary">닫기</button></form></header>
       <div class="basket-content"><div id="basket-list"></div><a class="button primary" href="/schedules">시간표 생성으로 이동</a></div>
+    </dialog>
+    <dialog id="section-dialog" aria-labelledby="section-title">
+      <header class="dialog-header"><div><h2 id="section-title"></h2><p id="section-meta"></p></div><form method="dialog"><button class="button secondary" autofocus>닫기</button></form></header>
+      <div id="section-list" class="table-wrap"></div>
+      <p id="section-status" role="status"></p>
     </dialog>
     <dialog id="profile-dialog" aria-labelledby="profile-title">
       <header class="dialog-header"><h1 id="profile-title">내 수강 정보</h1><button id="close-profile" class="button secondary" type="button">닫기</button></header>
