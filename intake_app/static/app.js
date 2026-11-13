@@ -697,8 +697,7 @@ function recommendationCourse(course) {
   const meta = [course.course_code, grade, `${courseCredits(course)}학점`].filter(Boolean).join(' · ');
   return `<li class="rec-item${unmet ? ' rec-item--required' : matched ? ' rec-item--match' : ''}">
     <div class="rec-item-main">
-      <div class="rec-course-label"><span class="rec-glyph">${lineIcon('book')}</span>
-        <strong class="course-title">${courseName}</strong></div>
+      <strong class="course-title">${courseName}</strong>
       <small>${esc(meta)}</small>
       ${matched ? `<span class="rec-highlight">${lineIcon('tag')} ${esc(matched)}</span>` : ''}
       ${reasons.length ? `<details class="rec-reasons"><summary>추천 이유</summary>
@@ -876,7 +875,7 @@ function renderRecommendations(result) {
         ${lineIcon('calendarOff')} ${rule.offered ? '추천 가능한 분반 없음' : '이번 학기 미개설'}
       </span>`;
       return `<div class="requirement-heading">
-        <div class="requirement-label"><span class="rec-glyph">${lineIcon('book')}</span><${heading}>${esc(rule.title)}</${heading}></div>
+        <${heading}>${esc(rule.title)}</${heading}>
         <div class="requirement-status">
           ${notes.length ? `<span class="requirement-meta">${esc(notes.join(' · '))}</span>` : ''}
           ${availability}</div></div>
