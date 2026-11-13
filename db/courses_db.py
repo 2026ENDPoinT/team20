@@ -26,6 +26,12 @@ COLUMNS = {
     "room": "BLDG_COUM", "language": "COUR_LANG", "capacity": "COUR_INWON",
     "day_night": "DN_DIV_NM", "note": "NOTE", "details": "ETC",
 }
+FLAG_FIELDS = {
+    "syllabus_available": "PROG_YN",
+    "other_department_restricted": "OTSH_LIMT_YN",
+    "other_department_allowed": "DLES_COUR_PBT_YN",
+    "engineering_accreditation": "ABEEK_YN",
+}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id INTEGER PRIMARY KEY, term TEXT NOT NULL, source TEXT NOT NULL,
@@ -89,14 +95,52 @@ def collect(term):
                 row = {key: clean_cell(raw.get(field)) for key, field in COLUMNS.items()}
                 row["id"] = ":".join((term, row["course_code"], row["section"], day_code))
                 row["group"] = "교양" if general else "전공"
-                row["school_flags"] = {key: clean_cell(raw.get(field)) for key, field in {
-                    "syllabus_available": "PROG_YN", "other_department_restricted": "OTSH_LIMT_YN",
-                    "other_department_allowed": "DLES_COUR_PBT_YN", "engineering_accreditation": "ABEEK_YN",
-                }.items()}
+                row["school_flags"] = {
+                    key: clean_cell(raw.get(field)) for key, field in FLAG_FIELDS.items()
+                }
                 rows.append(row)
-    if {row["group"] for row in rows} != {"전공", "교양"}:
+    groups = {row["group"] for row in rows}
+    required_groups = {"전공", "교양"} if term[-1] in {"1", "2"} else {"교양"}
+    if not required_groups <= groups:
         raise CourseError(f"{term} 전공·교양 조회 범위를 확인할 수 없습니다.")
     return rows
+
+
+def normalize_payload(row):
+    flags = row.get("school_flags") or {}
+    return {
+        **row,
+        "area": row.get("area"),
+        "source_url": row.get("source_url"),
+        "school_flags": {key: flags.get(key) for key in FLAG_FIELDS},
+    }
+
+
+def normalize_existing(db):
+    """Standardize historical payloads and update their content checksums."""
+    with db:
+        db.execute("BEGIN IMMEDIATE")
+        for snapshot_id, in db.execute("SELECT snapshot_id FROM snapshots").fetchall():
+            records = db.execute(
+                "SELECT offering_id, payload_json FROM course_offerings "
+                "WHERE snapshot_id = ? ORDER BY offering_id", (snapshot_id,)
+            ).fetchall()
+            encoded = []
+            edits = []
+            for offering_id, old in records:
+                row = json.loads(old)
+                normalized = normalize_payload(row)
+                new = json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+                encoded.append(new)
+                if normalized != row:
+                    edits.append((new, snapshot_id, offering_id))
+            if edits:
+                db.executemany(
+                    "UPDATE course_offerings SET payload_json = ? "
+                    "WHERE snapshot_id = ? AND offering_id = ?", edits
+                )
+                digest = hashlib.sha256("\n".join(encoded).encode()).hexdigest()
+                db.execute("UPDATE snapshots SET sha256 = ? WHERE snapshot_id = ?", (digest, snapshot_id))
 
 
 def publish(db, term, rows, source):
@@ -113,6 +157,7 @@ def publish(db, term, rows, source):
         expected_day = {"주간": "day", "야간": "night"}.get(row["day_night"])
         if expected_day and not key.endswith(":" + DAY_NIGHT[expected_day]):
             raise ValueError(f"분반 ID의 주야 코드가 일치하지 않습니다. {key}")
+        row = normalize_payload(row)
         previous = records.setdefault(key, row)
         if previous != row:
             raise ValueError(f"같은 분반 ID의 내용이 일치하지 않습니다. {key}")
@@ -150,7 +195,7 @@ def activate(db, term, snapshot_id):
 
 
 def run(args):
-    if args.command in {"list", "lookup", "activate", "backup"} and not args.db.is_file():
+    if args.command in {"list", "lookup", "activate", "backup", "normalize"} and not args.db.is_file():
         raise ValueError(f"DB 파일이 없습니다. 먼저 import-csv 또는 sync를 실행하세요. {args.db}")
     with closing(connect(args.db)) as db:
         version = db.execute("PRAGMA user_version").fetchone()[0]
@@ -159,7 +204,9 @@ def run(args):
         elif version != 1:
             raise ValueError(f"지원하지 않는 DB 스키마 버전입니다. {version}")
 
-        if args.command == "import-csv":
+        if args.command == "normalize":
+            normalize_existing(db)
+        elif args.command == "import-csv":
             publish(db, args.term, load_csv(args.path), f"csv:{args.path.name}")
         elif args.command == "sync":
             for term in dict.fromkeys(args.terms):
@@ -208,6 +255,7 @@ def main():
     sync = commands.add_parser("sync")
     sync.add_argument("terms", type=term_code, nargs="+")
     commands.add_parser("list")
+    commands.add_parser("normalize", help="저장된 모든 버전의 상세 JSON 필드 통일")
     lookup = commands.add_parser("lookup")
     lookup.add_argument("term", type=term_code)
     lookup.add_argument("query", type=str.strip)
