@@ -20,9 +20,12 @@ def xml(identifier='abc', year='2024', semester='1', subjects=None, references='
 class ParsingTests(unittest.TestCase):
     def test_link_is_strict(self):
         self.assertEqual(identifier_from_url('https://everytime.kr/@abc/'), 'abc')
+        self.assertEqual(identifier_from_url('https://everytime.kr/app/@abc'), 'abc')
         for url in ['https://everytime.kr.evil/@abc', 'http://everytime.kr/@abc',
                     'https://name@everytime.kr/@abc', 'https://everytime.kr/@abc?q=x',
-                    'https://everytime.kr/@abc/path', 'https://everytime.kr:bad/@abc']:
+                    'https://everytime.kr/@abc/path', 'https://everytime.kr:bad/@abc',
+                    'https://everytime.kr/app/@abc/path', 'https://everytime.kr/app/@abc?q=x',
+                    'https://everytime.kr.evil/app/@abc']:
             with self.subTest(url=url), self.assertRaises(ImportFailure):
                 identifier_from_url(url)
 

@@ -5,18 +5,32 @@ import json
 from pathlib import Path
 import secrets
 import sqlite3
+from threading import Lock
+from time import monotonic
 from urllib.parse import urlsplit
 
+from everytime_import.importer import ImportFailure, collect
+
 from .domain import ValidationError, ensure, validate_document, document_warnings
+from .imports import apply_import, check_import_sources, prepare_import
+from .offerings import compare_offerings
 from .store import Store, ConflictError
 
 BASE = Path(__file__).resolve().parent
 MAX_BODY = 12 * 1024 * 1024
+OFFICIAL_DB = BASE.parent / 'db' / 'courses.sqlite3'
+EMPTY_DOCUMENT = {'student': {}, 'course_attempts': []}
 
 class Application(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, database):
+    def __init__(self, address, database, official_db=OFFICIAL_DB, *, collector=collect):
+        if Path(database).resolve() == Path(official_db).resolve():
+            raise ValueError('학생 입력과 공식 강좌에 서로 다른 DB 파일을 지정해주세요.')
         self.store = Store(database)
+        self.official_db = official_db
+        self.collector = collector
+        self.import_lock = Lock()
+        self.previews = {}
         self.token = secrets.token_urlsafe(32)
         super().__init__(address, Handler)
 
@@ -60,13 +74,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/config':
             return self.respond(200, {'csrf_token': self.server.token})
         if path == '/api/input':
-            return self.respond(200, self.server.store.load())
+            saved = self.server.store.load()
+            if saved['document'] is not None:
+                saved['document'] = validate_document(saved['document'])
+            return self.respond(200, saved)
         return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
 
     def do_POST(self):
         if not self.allowed() or not secrets.compare_digest(self.headers.get('X-App-Token', ''), self.server.token):
             return self.respond(403, {'error': '앱을 새로고침한 뒤 다시 시도해주세요.'})
-        if urlsplit(self.path).path != '/api/input':
+        path = urlsplit(self.path).path
+        if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare'):
             return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
         try:
             self.connection.settimeout(110)
@@ -75,26 +93,96 @@ class Handler(BaseHTTPRequestHandler):
             ensure(0 < length <= MAX_BODY, '요청이 비어 있거나 너무 큽니다.')
             value = json.loads(self.rfile.read(length))
             ensure(isinstance(value, dict), '요청 형식 오류')
-            final = value.get('reviewed', False)
-            ensure(type(final) is bool, '입력 확인 상태 오류')
             version = value.get('version')
             ensure(type(version) is int and version >= 0, '저장 버전 오류')
+            if path == '/api/import/preview':
+                return self.preview_import(value, version)
+            if path == '/api/import/apply':
+                return self.commit_import(value, version)
+            if path == '/api/offerings/compare':
+                return self.compare_saved(version)
+            final = value.get('reviewed', False)
+            ensure(type(final) is bool, '입력 확인 상태 오류')
             document = validate_document(value.get('document'), final=final)
+            saved = self.load_version(version)
+            check_import_sources(document, saved['document'])
             result = self.server.store.save(document, version, reviewed=final)
             return self.respond(200, dict(**result, document=document, warnings=document_warnings(document)))
         except ConflictError as exc:
             return self.respond(409, {'error': str(exc)})
-        except (ValidationError, ValueError, TypeError) as exc:
-            return self.respond(400, {'error': str(exc) if isinstance(exc, ValidationError) else '입력 형식을 확인해주세요.'})
+        except (ValidationError, ImportFailure, ValueError, TypeError) as exc:
+            return self.respond(400, {'error': str(exc) if isinstance(exc, (ValidationError, ImportFailure))
+                                      else '입력 형식을 확인해주세요.'})
         except (sqlite3.Error, OSError):
             return self.respond(500, {'error': '로컬 저장 또는 처리에 실패했습니다. 폴더 권한과 디스크 공간을 확인해주세요.'})
+
+    def load_version(self, version, *, include_origins=False):
+        saved = self.server.store.load(include_import_origins=include_origins)
+        if saved['version'] != version:
+            raise ConflictError('다른 창에서 저장한 내용이 있습니다. 새로고침하고 다시 진행해주세요.')
+        return saved
+
+    def preview_import(self, value, version):
+        saved = self.load_version(version, include_origins=True)
+        document = validate_document(saved['document'] or EMPTY_DOCUMENT)
+        url = value.get('shared_url')
+        ensure(isinstance(url, str) and len(url) <= 300, '에브리타임 공유 링크를 확인해주세요.')
+        if not self.server.import_lock.acquire(blocking=False):
+            return self.respond(429, {'error': '시간표를 가져오는 중입니다. 완료 후 다시 시도해주세요.'})
+        try:
+            collection = self.server.collector(url, timeout=180)
+            self.load_version(version)
+            preview, hashes = prepare_import(collection, document, saved['import_origins'])
+            now = monotonic()
+            cache = self.server.previews
+            for key in list(cache):
+                if cache[key][0] <= now:
+                    del cache[key]
+            if len(cache) >= 8:
+                del cache[next(iter(cache))]
+            import_id = secrets.token_urlsafe(24)
+            preview.update(import_id=import_id, base_revision=version)
+            cache[import_id] = (now + 1800, preview, hashes)
+        finally:
+            self.server.import_lock.release()
+        return self.respond(200, preview)
+
+    def commit_import(self, value, version):
+        import_id = value.get('import_id')
+        ensure(isinstance(import_id, str), '가져오기 미리보기를 다시 열어주세요.')
+        saved = self.load_version(version)
+        item = self.server.previews.get(import_id)
+        if item is None or item[0] <= monotonic():
+            return self.respond(404, {'error': '미리보기가 만료됐습니다. 공유 링크를 다시 가져와주세요.'})
+        _, preview, hashes = item
+        if preview['base_revision'] != version:
+            raise ConflictError('학생 입력이 변경됐습니다. 공유 링크를 다시 가져와주세요.')
+        document = validate_document(saved['document'] or EMPTY_DOCUMENT)
+        origins = apply_import(document, preview, hashes, value.get('accepted_attempt_ids'),
+                               value.get('accepted_update_ids'))
+        document = validate_document(document)
+        result = self.server.store.save(document, version, import_origins=origins)
+        return self.respond(200, dict(**result, document=document, warnings=document_warnings(document)))
+
+    def compare_saved(self, version):
+        saved = self.load_version(version)
+        ensure(saved['document'] is not None, '이수내역을 저장한 후 대조해주세요.')
+        document = validate_document(saved['document'])
+        try:
+            matches = compare_offerings(self.server.official_db, document)
+        except (sqlite3.Error, OSError, ValueError):
+            return self.respond(503, {'error': '공식 개설강좌 DB를 읽을 수 없습니다. DB 파일을 확인해주세요.'})
+        self.load_version(version)
+        return self.respond(200, dict(kind='offering_comparison', schema_version=1, input_revision=version,
+                                      matches=matches))
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--db', type=Path, default=BASE / 'runtime' / 'student_inputs.sqlite')
+    parser.add_argument('--official-db', type=Path, default=OFFICIAL_DB)
     args = parser.parse_args()
-    server = Application(('127.0.0.1', args.port), args.db)
+    server = Application(('127.0.0.1', args.port), args.db, args.official_db)
     print(f'Local: http://127.0.0.1:{server.server_port}', flush=True)
     try:
         server.serve_forever()

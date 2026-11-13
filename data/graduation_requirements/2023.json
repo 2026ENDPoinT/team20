@@ -1,0 +1,684 @@
+{
+  "schema_version": 1,
+  "applies_to": {
+    "admission_year": 2023,
+    "department_id": "DEPT_CS",
+    "admission_type": "freshman",
+    "program_type": "standard_single_major_day"
+  },
+  "requirements": {
+    "university_common": [
+      {
+        "id": "total",
+        "type": "min_credits",
+        "title": "총 졸업 인정학점",
+        "bucket": "total",
+        "min": 130,
+        "source_refs": [
+          {
+            "source_id": "U1",
+            "locator": "학년수료 및 졸업학점, 2017학년도 이후 신입생"
+          }
+        ]
+      },
+      {
+        "id": "major",
+        "type": "min_credits",
+        "title": "전공 인정학점",
+        "bucket": "major",
+        "min": 70,
+        "source_refs": [
+          {
+            "source_id": "U1",
+            "locator": "학년수료 및 졸업학점, 2017학년도 이후 신입생"
+          }
+        ]
+      },
+      {
+        "id": "regular_terms",
+        "type": "min_regular_terms",
+        "title": "이수한 정규학기 수",
+        "min": 8,
+        "source_refs": [
+          {
+            "source_id": "U1",
+            "locator": "졸업요건과 졸업심사"
+          }
+        ]
+      }
+    ],
+    "university_general_education": [
+      {
+        "id": "creative",
+        "type": "required_course",
+        "title": "기초교양 창의",
+        "course_code": "100978",
+        "source_refs": [
+          {
+            "source_id": "U2",
+            "locator": "2023학번 해당 기초교양 표"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "ethics",
+        "type": "choose_n",
+        "title": "기초교양 인성",
+        "min": 1,
+        "course_codes": [
+          "100975",
+          "100977"
+        ],
+        "source_refs": [
+          {
+            "source_id": "U2",
+            "locator": "2023학번 해당 기초교양 표"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "writing",
+        "type": "required_course",
+        "title": "기초교양 글쓰기와 논리",
+        "course_code": "100788",
+        "source_refs": [
+          {
+            "source_id": "U2",
+            "locator": "2023학번 해당 기초교양 표"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "english",
+        "type": "choose_n",
+        "title": "기초교양 국제화",
+        "min": 1,
+        "course_codes": [
+          "100453",
+          "100454"
+        ],
+        "source_refs": [
+          {
+            "source_id": "U2",
+            "locator": "2023학번 해당 기초교양 표"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "career",
+        "type": "required_course",
+        "title": "기초교양 진로",
+        "course_code": "101032",
+        "source_refs": [
+          {
+            "source_id": "U2",
+            "locator": "2023학번 해당 기초교양 표"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "core_1",
+        "type": "choose_n",
+        "title": "핵심교양 1영역 사상과 문화",
+        "min": 1,
+        "course_codes": [
+          "100764",
+          "100643",
+          "100766",
+          "100865",
+          "100864"
+        ],
+        "source_refs": [
+          {
+            "source_id": "U4",
+            "locator": "2023학번 해당 핵심교양 표와 각주"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "core_2",
+        "type": "choose_n",
+        "title": "핵심교양 2영역 역사와 문명",
+        "min": 1,
+        "course_codes": [
+          "100639",
+          "100829",
+          "100762",
+          "100861",
+          "101018"
+        ],
+        "source_refs": [
+          {
+            "source_id": "U4",
+            "locator": "2023학번 해당 핵심교양 표와 각주"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "core_3",
+        "type": "choose_n",
+        "title": "핵심교양 3영역 인간과 사회",
+        "min": 1,
+        "course_codes": [
+          "100798",
+          "100799",
+          "100831",
+          "100784",
+          "101019"
+        ],
+        "source_refs": [
+          {
+            "source_id": "U4",
+            "locator": "2023학번 해당 핵심교양 표와 각주"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      }
+    ],
+    "engineering_ii": [
+      {
+        "id": "general",
+        "type": "min_credits",
+        "title": "공학Ⅱ계열 교양 인정학점",
+        "bucket": "general",
+        "min": 34,
+        "source_refs": [
+          {
+            "source_id": "U1",
+            "locator": "2023~2024학번 교양 요구학점표, 공학Ⅱ계열"
+          },
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          }
+        ]
+      },
+      {
+        "id": "foundation",
+        "type": "min_group_credits",
+        "title": "공학Ⅱ계열 학문기초교양",
+        "min": 6,
+        "course_codes": [
+          "100165",
+          "100816",
+          "100166",
+          "100817",
+          "101066",
+          "101067",
+          "101068",
+          "101069"
+        ],
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "U3",
+            "locator": "공학Ⅱ계열 학문기초교양 표"
+          }
+        ]
+      }
+    ],
+    "department": [
+      {
+        "id": "programming_1",
+        "type": "choose_n",
+        "title": "프로그래밍입문(1) 이수조건",
+        "min": 1,
+        "course_codes": [
+          "109003",
+          "109416"
+        ],
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "D2",
+            "locator": "2. 전공필수, 교양필수 관련"
+          }
+        ]
+      },
+      {
+        "id": "programming_2",
+        "type": "choose_n",
+        "title": "프로그래밍입문(2) 이수조건",
+        "min": 1,
+        "course_codes": [
+          "109004",
+          "109417"
+        ],
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "D2",
+            "locator": "2. 전공필수, 교양필수 관련"
+          }
+        ]
+      },
+      {
+        "id": "discrete_math",
+        "type": "required_course",
+        "title": "이산수학 이수조건",
+        "course_code": "109255",
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "D2",
+            "locator": "2. 전공필수, 교양필수 관련"
+          }
+        ]
+      },
+      {
+        "id": "capstone_1",
+        "type": "required_course",
+        "title": "캡스톤디자인(1) 이수조건",
+        "course_code": "109113",
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "D2",
+            "locator": "2. 전공필수, 교양필수 관련"
+          }
+        ]
+      },
+      {
+        "id": "capstone_2",
+        "type": "required_course",
+        "title": "캡스톤디자인(2) 이수조건",
+        "course_code": "109114",
+        "source_refs": [
+          {
+            "source_id": "C23",
+            "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+          },
+          {
+            "source_id": "D2",
+            "locator": "2. 전공필수, 교양필수 관련"
+          }
+        ]
+      }
+    ]
+  },
+  "elective_core_areas": [
+    {
+      "area": 4,
+      "title": "과학과 기술",
+      "course_codes": [
+        "100063",
+        "100356",
+        "100357"
+      ],
+      "source_refs": [
+        {
+          "source_id": "U4",
+          "locator": "2023학번 해당 핵심교양 표와 각주"
+        }
+      ]
+    },
+    {
+      "area": 5,
+      "title": "예술과 미래",
+      "course_codes": [
+        "100358",
+        "100359",
+        "100371"
+      ],
+      "source_refs": [
+        {
+          "source_id": "U4",
+          "locator": "2023학번 해당 핵심교양 표와 각주"
+        }
+      ]
+    }
+  ],
+  "credit_rules": [
+    {
+      "id": "precalculus_excluded",
+      "type": "exclude_credits",
+      "title": "대학기초수학 졸업학점 제외",
+      "course_codes": [
+        "100933"
+      ],
+      "buckets": [
+        "total",
+        "general"
+      ],
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        }
+      ]
+    },
+    {
+      "id": "basic_physics_excluded",
+      "type": "exclude_credits",
+      "title": "기초물리학 졸업학점 제외",
+      "course_codes": [
+        "101099"
+      ],
+      "buckets": [
+        "total",
+        "general"
+      ],
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        }
+      ]
+    },
+    {
+      "id": "coop_project_excluded",
+      "type": "exclude_credits",
+      "title": "코업프로젝트 졸업학점 제외",
+      "course_codes": [
+        "109501",
+        "109503"
+      ],
+      "buckets": [
+        "total",
+        "major"
+      ],
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        },
+        {
+          "source_id": "D6",
+          "locator": "3. 학점 인정 기준"
+        }
+      ]
+    },
+    {
+      "id": "sports_cap",
+      "type": "cap_credits",
+      "title": "교양선택 체육영역 재학 중 최대 6학점",
+      "selector": {
+        "credit_category": "general_elective",
+        "general_education_area": "체육"
+      },
+      "buckets": [
+        "total",
+        "general"
+      ],
+      "max": 6,
+      "aggregation": "across_all_terms",
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        }
+      ]
+    },
+    {
+      "id": "english_waiver",
+      "type": "approved_waiver",
+      "title": "교양필수영어 면제 승인",
+      "requirement_id": "english",
+      "credits_awarded": 0,
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        }
+      ]
+    },
+    {
+      "id": "core_distinct_credits",
+      "type": "count_each_distinct_course",
+      "title": "핵심교양의 서로 다른 과목 학점 인정",
+      "source_refs": [
+        {
+          "source_id": "U4",
+          "locator": "2023학번 해당 핵심교양 표와 각주"
+        }
+      ],
+      "course_codes": [
+        "100063",
+        "100356",
+        "100357",
+        "100358",
+        "100359",
+        "100371",
+        "100639",
+        "100643",
+        "100762",
+        "100764",
+        "100766",
+        "100784",
+        "100798",
+        "100799",
+        "100829",
+        "100831",
+        "100861",
+        "100864",
+        "100865",
+        "101018",
+        "101019"
+      ]
+    }
+  ],
+  "pending_reviews": [
+    {
+      "id": "ethics_duplicate_credits",
+      "title": "기초교양 택1 후보 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "requirement_id": "ethics",
+      "source_refs": [
+        {
+          "source_id": "U2",
+          "locator": "2023학번 해당 기초교양 표"
+        },
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        }
+      ]
+    },
+    {
+      "id": "english_duplicate_credits",
+      "title": "기초교양 택1 후보 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "requirement_id": "english",
+      "source_refs": [
+        {
+          "source_id": "U2",
+          "locator": "2023학번 해당 기초교양 표"
+        },
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        }
+      ]
+    },
+    {
+      "id": "programming_1_duplicate_credits",
+      "title": "전공필수 택1 후보 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "requirement_id": "programming_1",
+      "source_refs": [
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        },
+        {
+          "source_id": "D2",
+          "locator": "2. 전공필수, 교양필수 관련"
+        }
+      ]
+    },
+    {
+      "id": "programming_2_duplicate_credits",
+      "title": "전공필수 택1 후보 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "requirement_id": "programming_2",
+      "source_refs": [
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        },
+        {
+          "source_id": "D2",
+          "locator": "2. 전공필수, 교양필수 관련"
+        }
+      ]
+    },
+    {
+      "id": "calculus_1_duplicate_credits",
+      "title": "일반·고급 미분적분학 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "course_codes": [
+        "100165",
+        "100816"
+      ],
+      "source_refs": [
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        },
+        {
+          "source_id": "U3",
+          "locator": "공학Ⅱ계열 학문기초교양 표"
+        }
+      ]
+    },
+    {
+      "id": "calculus_2_duplicate_credits",
+      "title": "일반·고급 미분적분학 중복취득 인정 확인",
+      "trigger": "multiple_options_completed",
+      "affects": "credit_recognition",
+      "course_codes": [
+        "100166",
+        "100817"
+      ],
+      "source_refs": [
+        {
+          "source_id": "C23",
+          "locator": "인쇄면 307~310쪽 컴퓨터공학과 편성표"
+        },
+        {
+          "source_id": "U3",
+          "locator": "공학Ⅱ계열 학문기초교양 표"
+        }
+      ]
+    },
+    {
+      "id": "other_department_major",
+      "title": "타학과 전공의 학기별 인정 상한 및 승인 예외 확인",
+      "trigger": "other_department_major_completed",
+      "affects": "credit_recognition",
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        },
+        {
+          "source_id": "X1",
+          "locator": "타학과 전공학점 인정 예외 안내"
+        }
+      ]
+    },
+    {
+      "id": "graduation_exam_replacement",
+      "title": "영어 쓰기·읽기·말하기 기초 과목의 대체교과 지정 여부 확인",
+      "trigger": "listed_course_completed",
+      "affects": "credit_recognition",
+      "course_codes": [
+        "100967",
+        "100970",
+        "100971"
+      ],
+      "source_refs": [
+        {
+          "source_id": "D1",
+          "locator": "졸업인정학점 제외"
+        }
+      ]
+    },
+    {
+      "id": "field_training_timing",
+      "title": "졸업 직전 계절학기 현장실습 성적 반영 시점 확인",
+      "trigger": "field_training_in_final_season",
+      "affects": "credit_recognition",
+      "course_codes": [
+        "109024",
+        "109044"
+      ],
+      "source_refs": [
+        {
+          "source_id": "D6",
+          "locator": "3. 학점 인정 기준"
+        }
+      ]
+    }
+  ],
+  "default_credit_summary": {
+    "basic_general": 10,
+    "core_general": 9,
+    "required_math_physics_or_foundation": 6,
+    "general_required_default": 25,
+    "major_required_default": 15,
+    "general_total_min": 34
+  },
+  "sources": {
+    "C23": "https://www.seoultech.ac.kr/storage/www/life/info/college/schedule/2023_curiculum.pdf",
+    "D1": "https://computer.seoultech.ac.kr/info/notice?bidx=565268&bnum=58476&cate=7&do=view&nowpage=1&profboardidx=0&searchtext=&searchtype=",
+    "D2": "https://computer.seoultech.ac.kr/info/notice?allboard=false&bidx=777449&bnum=58476&cate=7&do=view&nowpage=1&profboardidx=0",
+    "D6": "https://computer.seoultech.ac.kr/info/job?bidx=887986&bnum=58478&cate=7&do=view&profboardidx=0",
+    "U1": "https://www.seoultech.ac.kr/life/info/college/graduate",
+    "U2": "https://liberal.seoultech.ac.kr/curriculum/common/",
+    "U3": "https://liberal.seoultech.ac.kr/curriculum/basics",
+    "U4": "https://liberal.seoultech.ac.kr/curriculum/education",
+    "X1": "https://iise.seoultech.ac.kr/notice/faculty_announcements_?bidx=554658&bnum=1302&do=commonview"
+  }
+}

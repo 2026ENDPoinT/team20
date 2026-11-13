@@ -2,12 +2,14 @@ import copy
 import http.client
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import threading
 import unittest
 
 from intake_app.domain import ValidationError, validate_document, document_warnings
 from intake_app.server import Application
+from everytime_import import collect
 
 BASE = Path(__file__).resolve().parents[1]
 
@@ -140,5 +142,81 @@ class StorageAndHttpTests(unittest.TestCase):
         self.assertEqual(self.request('/')[0],200)
         self.assertEqual(self.request('/runtime/student_inputs.sqlite')[0],404)
         self.assertEqual(self.request('/../store.py')[0],404)
+
+    def test_import_preview_apply_reimport_and_official_comparison(self):
+        name = '프로그래밍입문(2)'
+        professor = '강동완'
+
+        def fake_collection(url, **options):
+            xml = f'''<response><table identifier="example" year="2026" semester="2">
+                <subject id="subject-id"><internal value="109004-11001"/>
+                <name value="{name}"/><professor value="{professor}"/></subject>
+                <subject><name value="수동 과목"/></subject>
+                </table></response>'''
+            return collect(url, fetcher=lambda identifier: xml)
+
+        original = self.server.collector
+        self.server.collector = fake_collection
+        self.addCleanup(setattr, self.server, 'collector', original)
+        official = Path(self.temp.name) / 'official.sqlite'
+        with sqlite3.connect(official) as connection:
+            connection.executescript('''
+                CREATE TABLE snapshots (snapshot_id INTEGER, term TEXT, sha256 TEXT);
+                CREATE TABLE active_terms (term TEXT, snapshot_id INTEGER);
+                CREATE TABLE course_offerings (snapshot_id INTEGER, offering_id TEXT, course_code TEXT,
+                    section TEXT, course_name TEXT, professor TEXT, payload_json TEXT);
+                INSERT INTO snapshots VALUES (1, '20262', 'fixture-hash');
+                INSERT INTO active_terms VALUES ('20262', 1);
+            ''')
+            connection.execute('INSERT INTO course_offerings VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (1, '20262:109004:11001:00500001', '109004', '11001', name, professor, '{"credits":"3"}'))
+        connection.close()
+        self.addCleanup(setattr, self.server, 'official_db', self.server.official_db)
+        self.server.official_db = official
+        _, before = self.request('/api/input')
+        payload = {'version': before['version'], 'shared_url': 'https://everytime.kr/app/@example'}
+        status, preview = self.request('/api/import/preview', payload)
+        self.assertEqual(status, 200, preview)
+        self.assertEqual(self.request('/api/input')[1], before)
+        self.assertNotIn('source_timetable_id', json.dumps(preview))
+        self.assertNotIn('subject-id', json.dumps(preview))
+        self.assertTrue(all(row['completion_status'] == 'unconfirmed' for row in preview['course_attempts']))
+
+        apply = {'version': before['version'], 'import_id': preview['import_id'],
+                 'accepted_attempt_ids': [row['id'] for row in preview['course_attempts']],
+                 'accepted_update_ids': []}
+        status, saved = self.request('/api/import/apply', apply)
+        self.assertEqual(status, 200, saved)
+        self.assertEqual(self.request('/api/import/apply', apply)[0], 409)
+        comparison = self.request('/api/offerings/compare', {'version': saved['version']})[1]
+        self.assertTrue(all(row['status'] == 'not_checked' for row in comparison['matches']))
+
+        document = saved['document']
+        for row in document['course_attempts']:
+            row.update(completion_status='completed', user_confirmed=True, review_notes='직접 확인')
+        status, saved = self.request('/api/input', {'version': saved['version'], 'document': document})
+        self.assertEqual(status, 200, saved)
+        comparison = self.request('/api/offerings/compare', {'version': saved['version']})[1]
+        self.assertIn('offering_matched', [row['status'] for row in comparison['matches']])
+        self.assertIn('missing_lecture_code', [row['reason'] for row in comparison['matches']])
+        payload['version'] = saved['version']
+        status, repeated = self.request('/api/import/preview', payload)
+        self.assertEqual(status, 200, repeated)
+        self.assertEqual([row['action'] for row in repeated['changes']], ['unchanged', 'unchanged'])
+
+        professor = '변경된 교수'
+        status, changed = self.request('/api/import/preview', payload)
+        self.assertEqual(status, 200, changed)
+        self.assertEqual(changed['changes'][0]['changed_fields'], ['professor'])
+        self.assertEqual(changed['changes'][0]['action'], 'update')
+        status, updated = self.request('/api/import/apply', {
+            'version': saved['version'], 'import_id': changed['import_id'],
+            'accepted_attempt_ids': [], 'accepted_update_ids': [changed['course_attempts'][0]['id']],
+        })
+        self.assertEqual(status, 200, updated)
+        rows = {row['lecture_code']: row for row in updated['document']['course_attempts']}
+        self.assertFalse(rows['109004-11001']['user_confirmed'])
+        self.assertEqual(rows['109004-11001']['review_notes'], '직접 확인')
+        self.assertTrue(rows[None]['user_confirmed'])
 
 if __name__=='__main__':unittest.main()
