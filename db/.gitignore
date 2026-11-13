@@ -1,3 +1,4 @@
 *.sqlite3*
 !courses.sqlite3
+!everytime_ratings.sqlite3
 __pycache__/
