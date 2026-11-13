@@ -8,11 +8,14 @@
     <nav class="top-actions" aria-label="주 메뉴">
       <a id="home-nav" href="/">수강 정보</a>
       <a id="recommend-nav" href="/recommendations" target="_blank" rel="noopener">과목 추천</a>
+      <a id="schedule-nav" href="/schedules">시간표 생성</a>
     </nav>
+    <button id="open-basket" class="button secondary" type="button" aria-haspopup="dialog">바구니 <span id="basket-count" class="count">0</span></button>
     <button id="my-info" class="button secondary" type="button" aria-haspopup="dialog"><span class="profile-icon" aria-hidden="true"></span>내 정보</button>
   </div>
 </header>
 <main>
+    <span id="basket-status" class="sr-only" role="status"></span>
     <section class="page-hero" id="home-panel" hidden>
       <h1>수강 정보</h1>
       <p>학생 정보와 이수내역을 확인하세요.</p>
@@ -26,6 +29,52 @@
       </header>
       <div id="recommendation-results"></div>
     </section>
+    <section id="schedule-panel" hidden aria-labelledby="schedule-title">
+      <header class="page-hero"><h1 id="schedule-title">시간표 생성</h1><p>학점과 등교 조건에 맞는 분반 조합을 찾아요.</p></header>
+      <div class="schedule-workspace">
+      <div class="schedule-controls">
+      <form id="schedule-form" class="card schedule-form">
+        <fieldset class="interest-group"><legend>과목 바구니 <span id="schedule-basket-count" class="count">0</span></legend>
+          <p class="field-hint">담은 과목을 필수 포함 또는 선호로 사용할 수 있어요.</p>
+          <div id="schedule-basket-list"></div>
+        </fieldset>
+        <div class="form-grid">
+          <label>최소 학점<input id="schedule-min" type="number" min="1" max="30" step="1" required></label>
+          <label>최대 학점<input id="schedule-max" type="number" min="1" max="30" step="1" required></label>
+          <label>정렬<select id="schedule-sort"><option value="recommended">이수요건 우선</option><option value="fewest_days">수업 요일 수 최소</option><option value="least_gap">수업 사이 빈 시간 최소</option></select></label>
+        </div>
+        <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
+          <div class="tags" id="schedule-days"></div>
+        </fieldset>
+        <details class="schedule-options"><summary>고정 분반</summary>
+          <label>고정할 분반 ID<input id="schedule-locks" placeholder="후보에서 분반 고정 버튼을 누르세요"></label>
+        </details>
+        <button class="button primary" id="generate-schedule" type="submit">시간표 생성</button>
+      </form>
+      <p id="schedule-status" role="status"></p>
+      <section id="schedule-candidates" class="card" hidden aria-labelledby="schedule-candidate-title">
+        <div class="schedule-candidate-header">
+          <h2 id="schedule-candidate-title">시간표 후보</h2>
+          <button class="button secondary" id="edit-schedule-conditions" type="button">조건 수정</button>
+        </div>
+        <div id="schedule-results" role="group" aria-label="시간표 후보"></div>
+      </section>
+      </div>
+      <section class="card schedule-preview" aria-labelledby="schedule-preview-title">
+        <h2 id="schedule-preview-title">주간 시간표</h2>
+        <p id="schedule-preview-summary" role="status">시간표를 생성하면 여기에 표시돼요.</p>
+        <div id="schedule-calendar" class="schedule-calendar"></div>
+        <details id="schedule-offerings" hidden>
+          <summary>분반 상세</summary>
+          <div id="schedule-offering-table" class="table-wrap"></div>
+        </details>
+      </section>
+      </div>
+    </section>
+    <dialog id="basket-dialog" aria-labelledby="basket-title">
+      <header class="dialog-header"><h2 id="basket-title">과목 바구니</h2><form method="dialog"><button class="button secondary">닫기</button></form></header>
+      <div class="basket-content"><div id="basket-list"></div><a class="button primary" href="/schedules">시간표 생성으로 이동</a></div>
+    </dialog>
     <dialog id="profile-dialog" aria-labelledby="profile-title">
       <header class="dialog-header"><h1 id="profile-title">내 수강 정보</h1><button id="close-profile" class="button secondary" type="button">닫기</button></header>
       <div id="profile-content">

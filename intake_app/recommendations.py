@@ -178,7 +178,7 @@ def eligibility(offering):
     return 'needs_review'
 
 
-def recommend(database, document):
+def recommend(database, document, *, schedule_context=False):
     student = document['student']
     if student.get('program_type') is None:
         student = dict(student, program_type='standard_single_major_day')
@@ -311,7 +311,7 @@ def recommend(database, document):
             grade_rank = 3 if lower_grade else 2 if level is None else int(level > grade)
         candidate = dict(course_code=code, course_name=lead['course_name'], group=group, lower_grade=lower_grade,
                          recommended_grade=level, requirement_ids=needed, reasons=reasons,
-                         interest_tags=[tag['id'] for tag in tags if tag['id'] in course_tags]
+                         interest_score=interest, interest_tags=[tag['id'] for tag in tags if tag['id'] in course_tags]
                                        or ([OTHER] if OTHER in course_tags else []),
                          eligibility='needs_review' if uncertain else 'no_restriction_recorded',
                          sections=[{key: row[key] for key in ('offering_id','section_code','professor','credits','eligibility')}
@@ -320,7 +320,12 @@ def recommend(database, document):
             candidate['alternative_group'] = alternative_by_code[code]
         items.append(((RECOMMENDATION_GROUPS.index(group), grade_rank, uncertain, -interest, code), candidate))
     items.sort(key=lambda item: item[0])
-    return dict(kind='course_recommendations', schema_version=2, target_term=student['target_term'],
+    response = dict(kind='course_recommendations', schema_version=2, target_term=student['target_term'],
                 snapshot=target, requirements=results, credit_reviews=credit_reviews,
                 partial=bool(credit_reviews) or any(row['status'] == 'needs_review' for row in results),
                 candidates=[item for _, item in items])
+    if schedule_context:
+        pool = [dict(section, credit_bucket=bucket(section, general_codes))
+                for sections in by_code.values() for section in sections]
+        return response, pool, alternative_by_code, deficits
+    return response

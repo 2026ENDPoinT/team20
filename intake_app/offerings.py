@@ -43,7 +43,8 @@ def recommendation_offering(row, snapshot):
     return dict(details, category=row['category'], department_code=row['department_code'],
                 day_night=payload.get('day_night'), area=payload.get('area'),
                 school_flags=payload.get('school_flags') or {}, english_name=payload.get('english_name'),
-                note=payload.get('note'), details=payload.get('details'))
+                note=payload.get('note'), details=payload.get('details'),
+                schedule=payload.get('schedule'), room=payload.get('room'))
 
 
 def recommendation_data(database, document):
