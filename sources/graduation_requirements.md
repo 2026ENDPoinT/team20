@@ -130,7 +130,7 @@
 
 ## 5. 확인이 필요한 조건
 
-미확정 기준과 개인별 예외는 [검수 메모](<C:/dev/2026 해커톤/sources/review_notes.md>)에서 관리한다.
+미확정 기준과 개인별 예외는 [검수 메모](<review_notes.md>)에서 관리한다.
 
 실제 추천·시간표 계획에는 해당 학기의 개설과목, 선수과목, 수강제한, 수업시간, 수강학점 한도도 필요하다. 이 문서는 해당 운영 자료까지 검증한 목록은 아니다.
 
@@ -138,8 +138,8 @@
 
 ## 6. 관련 문서
 
-- [검증 이력·원본 대조 위치](<C:/dev/2026 해커톤/sources/verification_appendix.md>): 기존 문서의 검증 결과, 공지 불일치와 근거 보존.
-- [개발 설계 메모](<C:/dev/2026 해커톤/sources/course_planning_design.md>): 규칙 구조와 수강 계획 데이터 구분.
+- [검증 이력·원본 대조 위치](<verification_appendix.md>): 기존 문서의 검증 결과, 공지 불일치와 근거 보존.
+- [개발 설계 메모](<course_planning_design.md>): 규칙 구조와 수강 계획 데이터 구분.
 
 [U1]: https://www.seoultech.ac.kr/life/info/college/graduate
 [U3]: https://liberal.seoultech.ac.kr/curriculum/basics

@@ -1,9 +1,9 @@
 # 수강 추천·수강 계획 개발 설계와 상세 파이프라인
 
-현재 구현된 공유 링크 수집 모듈은 [everytime_import](<C:/dev/2026 해커톤/everytime_import/README.md>)에 있다. 학기·강좌코드·과목명·교수명과 원본 식별 정보를 JSON으로 저장하며, 과거 수업 일정·강의실·학점은 저장하지 않는다. 공식 과목 연결 및 입력 앱 UI 연동은 아직 수행하지 않았다.
+현재 구현된 공유 링크 수집 모듈은 [everytime_import](<../everytime_import/README.md>)에 있다. 학기·강좌코드·과목명·교수명과 원본 식별 정보를 JSON으로 저장하며, 과거 수업 일정·강의실·학점은 저장하지 않는다. 공식 과목 연결 및 입력 앱 UI 연동은 아직 수행하지 않았다.
 
 정리일: 2026-11-12  
-기준 문서: [컴퓨터공학과 교과 이수요건](<C:/dev/2026 해커톤/sources/graduation_requirements.md>)
+기준 문서: [컴퓨터공학과 교과 이수요건](<graduation_requirements.md>)
 
 ## 1. 기능 범위
 
