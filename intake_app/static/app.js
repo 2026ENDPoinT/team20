@@ -33,6 +33,8 @@ const fields={'admission-year':'admission_year',grade:'grade',department:'depart
 const numeric = new Set(['admission_year','grade','min_credits','max_credits','transfer_recognized_credits','regular_terms_completed']);
 let tags = [], interestAliases = {};
 let supportsScheduleExclusions = false;
+let geminiAdvisorAvailable = null;
+let advisorChatAvailable = false;
 function message(text,type='info'){$('#message').textContent=text;$('#message').className='message '+type;$('#message').hidden=false;}
 function touch() {
   clearImportPreview();
@@ -470,8 +472,13 @@ async function init() {
     const config = await api('/api/config');
     csrf = config.csrf_token;
     browserStorage = config.browser_storage === true;
+    $('#public-data-handling').hidden = !browserStorage;
+    $('#local-data-handling').hidden = browserStorage;
     $('#browser-storage-notice').hidden = !browserStorage;
     supportsScheduleExclusions = config.schedule_course_exclusions === true;
+    geminiAdvisorAvailable = config.gemini_advisor ?? null;
+    advisorChatAvailable = config.advisor_chat === true;
+    advisorOpen.hidden = !advisorChatAvailable;
     tags = config.interest_tags;
     interestAliases = config.interest_aliases;
     const saved = await api('/api/input');
@@ -620,6 +627,7 @@ $('#apply-import').addEventListener('click', async () => {
 
 const recommendationStatus = {met:'충족', not_met:'미충족', needs_review:'미충족'};
 const majorRequiredGroups = ['current_major_required', 'future_major_required'];
+const generalElectiveLimit = 30;
 const recommendationGroups = [
   ['major_required', '전공필수'],
   ['required_general', '교양필수'],
@@ -680,7 +688,7 @@ async function loadScheduleRecommendations() {
     const [year, semester] = result.target_term.split('-');
     $('#schedule-term').textContent = `${year}년 ${semester}학기`;
     panel.innerHTML = recommendationGroups.map(([group, title]) => {
-      const courses = result.candidates.filter(course => matchesRecommendationGroup(course.group, group));
+      const courses = displayedRecommendationCourses(result.candidates, group);
       const rules = result.requirements.filter(rule =>
         rule.status !== 'met' && matchesRecommendationGroup(rule.recommendation_group, group));
       if (!courses.length && !rules.length) return '';
@@ -714,6 +722,11 @@ function scheduleCourseCard(course, showReason) {
     <div class="schedule-rec-actions"><button type="button" class="button secondary" data-view-sections="${esc(course.course_code)}" aria-haspopup="dialog">분반 보기</button>
     <button type="button" class="button secondary" data-basket-add="${esc(course.course_code)}" data-course-name="${esc(course.course_name)}">선택</button></div>
   </div>`;
+}
+
+function displayedRecommendationCourses(candidates, group) {
+  const courses = candidates.filter(course => matchesRecommendationGroup(course.group, group));
+  return group === 'general_credits' ? courses.slice(0, generalElectiveLimit) : courses;
 }
 
 function recommendationEntries(courses) {
@@ -922,9 +935,11 @@ function closeScheduleSections(restoreFocus = true) {
 function renderRecommendations(result) {
   const candidates = result.candidates;
   recommendedCourses = new Map(candidates.map(course => [course.course_code, course]));
+  let displayedCount = 0;
   const sections = recommendationGroups.map(([group, title]) => {
-    const rows = candidates.filter(course => matchesRecommendationGroup(course.group, group));
+    const rows = displayedRecommendationCourses(candidates, group);
     const entries = recommendationEntries(rows);
+    displayedCount += entries.length;
     const required = result.requirements.filter(rule =>
       rule.status !== 'met' && matchesRecommendationGroup(rule.recommendation_group, group));
     const creditRule = result.requirements.find(rule => rule.id === group.replace('_credits', ''));
@@ -965,7 +980,7 @@ function renderRecommendations(result) {
       content = '<p>남은 요건이 없습니다.</p>';
     }
     const count = group.endsWith('_credits') ? `후보 ${entries.length}개` : `남은 요건 ${required.length}개`;
-    const priority = (group === 'major_required' && rows.some(course => course.group === majorRequiredGroups[0])) ||
+    const priority = (group === 'major_required' && required.length > 0) ||
       (group === 'required_general' && rows.length > 0 && required.length > 0);
     const open = group === 'major_required' && required.length > 0;
     return `<details class="result-panel${priority ? ' result-panel--priority' : ''}"${open ? ' open' : ''}>
@@ -1007,7 +1022,7 @@ function renderRecommendations(result) {
   </section>`;
   const metrics = $('#recommendation-metrics');
   metrics.innerHTML = `<span><strong>${esc(result.target_term)}</strong>추천 학기</span>
-    <span><strong>${recommendationEntries(candidates).length}</strong>추천 후보</span>
+    <span><strong>${displayedCount}</strong>추천 후보</span>
 `;
   metrics.hidden = false;
   $('#recommendation-summary').textContent = '';
@@ -1365,6 +1380,7 @@ $('#schedule-days').innerHTML = scheduleDays.map(day =>
 ).join('');
 
 let scheduleCandidates = [];
+let selectedSchedule = null;
 
 const scheduleSectionList = $('#schedule-section-list');
 function previewScheduleSection(row) {
@@ -1460,13 +1476,116 @@ function scheduleSpacing(plan) {
   return plan.adjacent_sessions ? "연강 " + plan.adjacent_sessions + "회" : "연강 없음";
 }
 
-function renderCalendar(plan = null, preview = false) {
+function calendarLayout(plan) {
   const entries = (plan?.offerings ?? []).flatMap((offering, color) =>
     offering.meetings.map(meeting => ({...meeting, offering, color: color % 6})));
   const visibleDays = scheduleDays.filter((day, index) => index < 5 ||
     entries.some(meeting => meeting.day === day));
   const first = Math.min(2, ...entries.map(meeting => 2 * Math.floor(meeting.start / 2)));
   const end = Math.max(20, ...entries.map(meeting => 2 * Math.ceil(meeting.end / 2)));
+  return {entries, visibleDays, first, end};
+}
+
+let shareableSchedule = null;
+const scheduleShareButton = $('#share-schedule-image');
+const scheduleShareStatus = $('#schedule-share-status');
+
+function scheduleImageFile(plan) {
+  const {entries, visibleDays, first, end} = calendarLayout(plan);
+  const pad = 24, periodWidth = 48, dayWidth = 168, header = 38, half = 27;
+  const gridTop = 86;
+  const width = pad * 2 + periodWidth + dayWidth * visibleDays.length;
+  const height = gridTop + header + half * (end - first) + pad;
+  const canvas = document.createElement('canvas');
+  canvas.width = width * 2;
+  canvas.height = height * 2;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+  const palette = ['#f3ded4', '#f8ecd3', '#f0e4d4', '#efdee6', '#f7e6e2', '#eae9df'];
+  const text = (value, x, y, size = 14, bold = false) => {
+    ctx.fillStyle = '#2d2328';
+    ctx.font = `${bold ? '700' : '400'} ${size}px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.fillText(value, x, y);
+  };
+  const box = (x, y, w, h, fill) => {
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ddd1c5';
+    ctx.strokeRect(x, y, w, h);
+  };
+  ctx.fillStyle = '#fffcf7';
+  ctx.fillRect(0, 0, width, height);
+  text('주간 시간표', pad, 20, 25, true);
+  text($('#schedule-preview-summary').textContent, pad, 55);
+  box(pad, gridTop, periodWidth, header, '#f8f4ee');
+  text('교시', pad + 8, gridTop + 11);
+  const top = gridTop + header;
+  visibleDays.forEach((day, i) => {
+    const x = pad + periodWidth + i * dayWidth;
+    box(x, gridTop, dayWidth, header, '#f8f4ee');
+    text(day, x + 12, gridTop + 11, 14, true);
+  });
+  for (let tick = first; tick < end; tick += 2) {
+    const y = top + (tick - first) * half;
+    box(pad, y, periodWidth, half * 2, '#f8f4ee');
+    text(String(tick / 2), pad + 12, y + 8);
+    visibleDays.forEach((_, i) => box(pad + periodWidth + i * dayWidth, y, dayWidth, half * 2, '#fffcf7'));
+  }
+  for (const meeting of entries) {
+    const x = pad + periodWidth + visibleDays.indexOf(meeting.day) * dayWidth;
+    const y = top + (meeting.start - first) * half;
+    const h = (meeting.end - meeting.start) * half;
+    box(x + 1, y + 1, dayWidth - 2, h - 2, palette[meeting.color]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + 7, y + 3, dayWidth - 14, h - 6);
+    ctx.clip();
+    ctx.font = '700 14px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+    let line = '', lineY = y + 6;
+    for (const character of meeting.offering.course_name) {
+      if (ctx.measureText(line + character).width > dayWidth - 16) {
+        text(line, x + 8, lineY, 14, true);
+        lineY += 17;
+        line = '';
+      }
+      line += character;
+    }
+    text(line, x + 8, lineY, 14, true);
+    if (lineY + 32 <= y + h) {
+      text([meeting.offering.section_code, meeting.offering.room].filter(Boolean).join(' · '), x + 8, lineY + 18, 12);
+    }
+    ctx.restore();
+  }
+  const binary = atob(canvas.toDataURL('image/png').split(',')[1]);
+  return new File([Uint8Array.from(binary, character => character.charCodeAt(0))], '수강나침반-시간표.png', {type:'image/png'});
+}
+
+scheduleShareButton.addEventListener('click', () => {
+  if (!shareableSchedule) return;
+  scheduleShareStatus.hidden = true;
+  try {
+    const file = scheduleImageFile(shareableSchedule);
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    scheduleShareStatus.textContent = '다운로드 목록에서 시간표 PNG를 확인해주세요.';
+  } catch {
+    scheduleShareStatus.textContent = '시간표 이미지를 만들지 못했어요. 다시 시도해주세요.';
+  }
+  scheduleShareStatus.hidden = false;
+});
+
+function renderCalendar(plan = null, preview = false) {
+  shareableSchedule = !preview && plan?.offerings.length ? plan : null;
+  scheduleShareButton.disabled = !shareableSchedule;
+  scheduleShareStatus.hidden = true;
+  const {entries, visibleDays, first, end} = calendarLayout(plan);
   const rows = [];
   for (let tick = first; tick < end; tick++) {
     const cells = [];
@@ -1519,22 +1638,25 @@ function renderScheduleAnalytics(plan) {
   widget.hidden = !plan;
   if (!plan) return;
   const other = Math.max(0, +(plan.credits - plan.major_credits - plan.general_credits).toFixed(2));
-  const mix = [['전공', plan.major_credits], ['교양', plan.general_credits], ['기타', other]]
-    .filter(([, value]) => value > 0);
+  const mix = [
+    {kind:'major', label:'전공', credits:plan.major_credits},
+    {kind:'general', label:'교양', credits:plan.general_credits},
+    {kind:'other', label:'기타', credits:other},
+  ].filter(part => part.credits > 0);
   const metrics = [['연강', `${plan.adjacent_sessions}회`], ['수업 사이 빈 시간', `${plan.gap_periods}교시`]];
   const ratings = plan.offerings.map(row => row.everytime_rating)
     .filter(rating => rating?.status === 'rated' && Number.isFinite(rating.score));
   if (ratings.length) metrics.push([
-    `에타 평균 · 평가 ${ratings.length}/${plan.offerings.length}분반`,
-    `${(ratings.reduce((sum, rating) => sum + rating.score, 0) / ratings.length).toFixed(2)} / 5`,
+    '에타 평균 별점',
+    `★ ${(ratings.reduce((sum, rating) => sum + rating.score, 0) / ratings.length).toFixed(2)} / 5`,
   ]);
   widget.innerHTML = `<div class="schedule-viz">
     <figure class="viz schedule-mix"><figcaption>학점 구성</figcaption>
-      <svg class="credit-stack" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">${mix.map(([, value], i) => {
-        const start = mix.slice(0, i).reduce((sum, [, credits]) => sum + credits, 0);
-        return `<rect class="credit-part-${i}" x="${1000 * start / plan.credits}" width="${1000 * value / plan.credits}" height="12"/>`;
+      <svg class="credit-stack" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">${mix.map(({kind, credits}, i) => {
+        const start = mix.slice(0, i).reduce((sum, part) => sum + part.credits, 0);
+        return `<rect class="credit-part-${kind}" x="${1000 * start / plan.credits}" width="${1000 * credits / plan.credits}" height="12"/>`;
       }).join('')}</svg>
-      <ul>${mix.map(([label, value], i) => `<li><i class="credit-part-${i}" aria-hidden="true"></i>${label} <strong>${value}학점</strong></li>`).join('')}</ul>
+      <ul>${mix.map(({kind, label, credits}) => `<li><i class="credit-part-${kind}" aria-hidden="true"></i>${label} <strong>${credits}학점</strong></li>`).join('')}</ul>
     </figure>
     <dl class="schedule-numbers">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
   </div>`;
@@ -1543,10 +1665,13 @@ function renderScheduleAnalytics(plan) {
 function showSchedule(index) {
   const plan = scheduleCandidates[index];
   if (!plan) return;
+  selectedSchedule = plan;
+  $('#start-registration-practice').hidden = false;
   for (const button of document.querySelectorAll('[data-schedule-index]')) {
     button.setAttribute('aria-pressed', String(Number(button.dataset.scheduleIndex) === index));
   }
-  $('#schedule-preview-summary').textContent = `${index + 1}위 · ${plan.credits}학점 · ${scheduleClassDays(plan).join('·')} 수업${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
+  const label = plan.advisorGenerated ? `${candidateLabel(index)} (AI 선배 추천)` : `${index + 1}위`;
+  $('#schedule-preview-summary').textContent = `${label} · ${plan.credits}학점 · ${scheduleClassDays(plan).join('·')} 수업${plan.provisional ? ' · 수강 자격 확인 필요' : ''}`;
   renderScheduleAnalytics(plan);
   renderCalendar(plan);
   const locked = new Set(readBasket().map(row => row.offeringId));
@@ -1562,13 +1687,669 @@ function showSchedule(index) {
   $('#schedule-offerings').hidden = false;
 }
 
+const practiceDialog = $('#registration-practice');
+const practiceStart = $('#start-registration-practice');
+const practiceApply = $('#registration-practice-apply');
+const practiceRetry = $('#registration-practice-retry');
+const practiceClock = $('#registration-practice-clock');
+const practiceClockSeconds = practiceClock.querySelector('span');
+const practiceClockMillis = practiceClock.querySelector('small');
+const practiceResult = $('#registration-practice-result');
+const practiceScore = $('#registration-practice-score');
+const practiceFeedback = $('#registration-practice-feedback');
+const practiceBestKey = 'registration-practice-best-ms';
+const practiceOpeningTime = 10 * 60 * 60 * 1000;
+const practiceExcellentMs = 50;
+let practiceDeadline = null;
+let practiceFrame = null;
+let practiceBest = null;
+
+function clearSelectedSchedule() {
+  selectedSchedule = null;
+  practiceStart.hidden = true;
+  if (advisorDialog.open) advisorDialog.close();
+  if (practiceDialog.open) practiceDialog.close();
+}
+
+function syncPracticeBest() {
+  try {
+    const stored = localStorage.getItem(practiceBestKey);
+    const value = Number(stored);
+    if (stored !== null && stored.trim() && Number.isFinite(value) && value >= 0) {
+      practiceBest = Math.min(practiceBest ?? Infinity, value);
+    }
+  } catch { /* Keep the best time in memory if storage is unavailable. */ }
+  $('#registration-practice-best').textContent = practiceBest === null ? '—' : `${(practiceBest / 1000).toFixed(3)}초`;
+}
+
+function showPracticeTime(offset) {
+  const time = new Date(Math.floor(practiceOpeningTime + offset)).toISOString();
+  const seconds = `${time.slice(11, 13)}시 ${time.slice(14, 16)}분 ${time.slice(17, 19)}초`;
+  if (practiceClockSeconds.textContent !== seconds) practiceClockSeconds.textContent = seconds;
+  practiceClockMillis.textContent = time.slice(20, 23);
+  practiceClock.classList.toggle('is-open', offset >= 0);
+}
+
+function tickPracticeClock() {
+  if (practiceDeadline === null || !practiceDialog.open) return;
+  showPracticeTime(performance.now() - practiceDeadline);
+  practiceFrame = requestAnimationFrame(tickPracticeClock);
+}
+
+function startPracticeRound() {
+  syncPracticeBest();
+  practiceScore.hidden = true;
+  practiceScore.textContent = '';
+  practiceFeedback.textContent = '';
+  practiceResult.classList.remove('is-excellent');
+  practiceRetry.hidden = true;
+  practiceApply.hidden = false;
+  practiceApply.disabled = false;
+  practiceApply.focus({preventScroll:true});
+  const wait = 2000 + Math.floor(Math.random() * 3001);
+  practiceDeadline = performance.now() + wait;
+  showPracticeTime(-wait);
+  practiceFrame = requestAnimationFrame(tickPracticeClock);
+}
+
+function stopPracticeRound() {
+  practiceDeadline = null;
+  cancelAnimationFrame(practiceFrame);
+  practiceFrame = null;
+}
+
+function finishPracticeRound(message, score = '') {
+  stopPracticeRound();
+  practiceResult.classList.toggle('is-excellent', Boolean(score));
+  practiceScore.textContent = score;
+  practiceScore.hidden = !score;
+  practiceFeedback.textContent = message;
+  practiceApply.disabled = true;
+  practiceApply.hidden = true;
+  practiceRetry.hidden = false;
+  practiceRetry.focus({preventScroll:true});
+}
+
+practiceStart.addEventListener('click', () => {
+  if (!selectedSchedule || practiceDialog.open) return;
+  const {offerings, credits} = selectedSchedule;
+  $('#registration-practice-summary').textContent = `${offerings.length}과목 · 총 ${credits}학점`;
+  const calendar = $('#registration-practice-calendar');
+  calendar.replaceChildren($('#schedule-calendar').firstElementChild.cloneNode(true));
+  practiceDialog.showModal();
+  calendar.scrollTo(0, 0);
+  startPracticeRound();
+});
+
+practiceApply.addEventListener('click', event => {
+  if (practiceDeadline === null || !practiceDialog.open || document.hidden) return;
+  const offset = event.timeStamp - practiceDeadline;
+  showPracticeTime(offset);
+  const seconds = (Math.abs(offset) / 1000).toFixed(3);
+  const excellent = offset >= 0 && offset <= practiceExcellentMs;
+  const message = offset < 0 ? `${seconds}초 일찍 눌렀어요.` : `시작 후 ${seconds}초에 눌렀어요.`;
+  if (offset >= 0) syncPracticeBest();
+  const newBest = offset >= 0 && (practiceBest === null || offset < practiceBest);
+  if (newBest) {
+    practiceBest = offset;
+    try { localStorage.setItem(practiceBestKey, String(offset)); }
+    catch { /* Keep the best time in memory if storage is unavailable. */ }
+    syncPracticeBest();
+  }
+  const feedback = excellent ? '정각을 잡았어요!' : message;
+  finishPracticeRound(newBest ? `${feedback} 신기록` : feedback, excellent ? `${seconds}초` : '');
+});
+
+practiceRetry.addEventListener('click', () => {
+  if (practiceDialog.open && practiceDeadline === null) startPracticeRound();
+});
+practiceDialog.addEventListener('keydown', event => {
+  if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
+});
+practiceDialog.addEventListener('close', () => {
+  if (!practiceDialog.open) stopPracticeRound();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && practiceDialog.open && practiceDeadline !== null) {
+    finishPracticeRound('다른 탭으로 이동해 이번 연습을 취소했어요.');
+  }
+});
+
+const advisorDialog = $('#schedule-advisor');
+const advisorOpen = $('#open-schedule-advisor');
+const advisorContent = $('#advisor-content');
+const advisorChat = $('#advisor-chat');
+const advisorTranscript = $('#advisor-transcript');
+const advisorStatusMessage = $('#advisor-status');
+const advisorQuestion = $('#advisor-question');
+const advisorInput = $('#advisor-question-text');
+let graduationRequirements = [];
+let scheduleRequest = null;
+let scheduleSnapshot = null;
+let advisorPrimary = 0;
+let advisorIntent = null;
+let advisorTopic = null;
+let advisorSuggested = [];
+let advisorPendingCandidate = null;
+let advisorRevision = 0;
+let advisorBusy = false;
+
+const advisorCriteria = {
+  required:'새로 충족할 전필',
+  days:'등교일',
+  eligibility:'자격 확인 필요 분반',
+  gaps:'빈 교시',
+};
+const advisorUnits = {required:'개', days:'일', eligibility:'개', gaps:'교시'};
+const advisorStatus = {met:'충족', not_met:'미충족', needs_review:'확인 필요'};
+const candidateLabel = index => `${index + 1}번 후보`;
+const eligibilityChecks = plan => plan.offerings.filter(row => row.eligibility === 'needs_review');
+const majorRequirement = rule => ['current_major_required', 'future_major_required'].includes(rule.recommendation_group);
+const projectedRequirement = (plan, rule) => plan.graduation_projection?.[rule.id];
+
+function advisorValue(plan, topic) {
+  if (topic === 'required') {
+    return graduationRequirements.filter(rule => majorRequirement(rule) && rule.status !== 'met'
+      && projectedRequirement(plan, rule)?.after.status === 'met').length;
+  }
+  if (topic === 'days') return scheduleClassDays(plan).length;
+  if (topic === 'eligibility') return eligibilityChecks(plan).length;
+  return plan.gap_periods;
+}
+
+function advisorPlanSummary(plan) {
+  return `${plan.credits}학점 · ${scheduleClassDays(plan).join('·')} · 전필 충족 예상 ${advisorValue(plan, 'required')}개${plan.provisional ? ' · 자격 확인 필요' : ''}`;
+}
+
+function scrollAdvisorTo(element) {
+  advisorTranscript.scrollTop += element.getBoundingClientRect().top
+    - advisorTranscript.getBoundingClientRect().top;
+}
+
+function addAdvisorMessage(speaker, ...paragraphs) {
+  const row = document.createElement('div');
+  row.className = speaker === '나' ? 'advisor-user-message' : 'advisor-reply';
+  const name = document.createElement('strong');
+  name.textContent = speaker;
+  row.append(name);
+  for (const text of paragraphs.filter(Boolean)) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = text;
+    row.append(paragraph);
+  }
+  advisorChat.append(row);
+  scrollAdvisorTo(row);
+  return row;
+}
+
+function matchesAdvisorConstraints(plan, intent) {
+  const days = scheduleClassDays(plan);
+  return intent.days_off.every(day => !days.includes(day))
+    && (intent.min_credits === null || plan.credits >= intent.min_credits)
+    && (intent.max_credits === null || plan.credits <= intent.max_credits);
+}
+
+function compareAdvisorPlans(a, b, intent) {
+  for (const topic of intent.priorities) {
+    const difference = compareAdvisorCriterion(a, b, topic);
+    if (difference) return difference;
+  }
+  return 0;
+}
+
+function compareAdvisorCriterion(a, b, topic) {
+  const difference = advisorValue(a, topic) - advisorValue(b, topic);
+  return topic === 'required' ? -difference : difference;
+}
+
+function advisorMetric(plan, topic) {
+  return `${advisorValue(plan, topic)}${advisorUnits[topic]}`;
+}
+
+function advisorComparison(base, alternative, intent) {
+  const days = plan => scheduleClassDays(plan).join('·') || '없음';
+  const requested = intent?.priorities ?? [];
+  const metrics = topics => topics.map(topic => [advisorCriteria[topic], advisorMetric(base, topic), advisorMetric(alternative, topic)]);
+  const credits = ['총학점', `${base.credits}학점`, `${alternative.credits}학점`];
+  const hasCreditLimit = intent && (intent.min_credits !== null || intent.max_credits !== null);
+  const items = [
+    ...(intent?.days_off ?? []).map(day => {
+      const status = plan => scheduleClassDays(plan).includes(day) ? '수업 있음' : '공강';
+      return [`${day}요일`, status(base), status(alternative)];
+    }),
+    ...metrics(requested),
+    ...(hasCreditLimit ? [credits] : []),
+    ...metrics(Object.keys(advisorCriteria).filter(topic => !requested.includes(topic))),
+    ...(!hasCreditLimit ? [credits] : []),
+    ['수업 요일', days(base), days(alternative)],
+  ];
+  return items.filter(([, before, after]) => before !== after);
+}
+
+function suggestAdvisorCandidate(intent, primary) {
+  const base = scheduleCandidates[primary];
+  const priorities = intent.priorities.length ? intent.priorities : ['required', 'days', 'gaps', 'eligibility'];
+  const ranking = {...intent, priorities};
+  const matching = scheduleCandidates.map((plan, index) => ({plan, index}))
+    .filter(({plan, index}) => index !== primary && matchesAdvisorConstraints(plan, intent))
+    .sort((a, b) => compareAdvisorPlans(a.plan, b.plan, ranking));
+  advisorSuggested = [];
+  const [first, ...others] = matching;
+  if (!first) {
+    addAdvisorMessage('AI 선배', scheduleRequest
+      ? '조건에 맞는 다른 후보가 없어. “그 조건으로 새로 만들어줘”라고 물어봐.'
+      : '조건에 맞는 다른 후보가 없어.');
+    return;
+  }
+  const second = others.find(({plan}) => priorities.some(topic => compareAdvisorCriterion(plan, first.plan, topic) < 0));
+  advisorSuggested = second ? [first.index, second.index] : [first.index];
+  const firstAdvantage = second && priorities.find(topic => compareAdvisorCriterion(first.plan, second.plan, topic) < 0);
+  const secondAdvantage = second && priorities.find(topic => compareAdvisorCriterion(second.plan, first.plan, topic) < 0);
+  const currentIsBetter = matchesAdvisorConstraints(base, intent) && compareAdvisorPlans(base, first.plan, ranking) < 0;
+  const lead = currentIsBetter ? '지금 시간표가 우선순위에 더 잘 맞아. 아래는 바꿔볼 만한 후보야.'
+    : second ? '우선순위에 따라 이 두 후보를 볼 만해.' : '이 후보를 먼저 봐.';
+  const message = addAdvisorMessage('AI 선배', lead);
+  const rows = [[candidateLabel(first.index), advisorCandidateReason(first.plan, intent, firstAdvantage || priorities[0])]];
+  if (second) rows.push([candidateLabel(second.index), advisorCandidateReason(second.plan, intent, secondAdvantage)]);
+  addAdvisorTable(message, '추천 시간표', ['후보', '핵심 기준'], rows);
+}
+
+function addAdvisorTable(message, label, headings, rows) {
+  if (!rows.length) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'advisor-table';
+  const table = document.createElement('table');
+  table.setAttribute('aria-label', label);
+  const header = table.createTHead().insertRow();
+  for (const text of headings) {
+    const heading = document.createElement('th');
+    heading.scope = 'col';
+    heading.textContent = text;
+    header.append(heading);
+  }
+  const body = table.createTBody();
+  for (const [title, ...values] of rows) {
+    const row = body.insertRow();
+    const heading = document.createElement('th');
+    heading.scope = 'row';
+    heading.textContent = title;
+    row.append(heading);
+    for (const value of values) row.insertCell().textContent = value;
+  }
+  wrap.append(table);
+  message.append(wrap);
+  message.classList.add('advisor-reply-with-table');
+  scrollAdvisorTo(message);
+  return table;
+}
+
+function advisorCandidateReason(plan, intent, advantage) {
+  const criteria = [];
+  if (intent.days_off.length) criteria.push(`${intent.days_off.join('·')}요일 공강`);
+  if (intent.min_credits !== null || intent.max_credits !== null) criteria.push(`${plan.credits}학점`);
+  const topic = advantage || intent.priorities[0];
+  if (topic) criteria.push(`${advisorCriteria[topic]} ${advisorMetric(plan, topic)}`);
+  return criteria.join(' · ') || `${plan.credits}학점 · ${scheduleClassDays(plan).length}일 등교`;
+}
+
+function showAdvisorCandidate(index) {
+  const plan = scheduleCandidates[index];
+  const message = addAdvisorMessage('AI 선배', `${candidateLabel(index)}는 ${plan.offerings.length}과목, ${plan.credits}학점이야.`);
+  const courses = plan.offerings.slice(0, 3).map(row => [`${row.course_name} (${row.section_code})`, row.schedule]);
+  if (courses.length < plan.offerings.length) courses.push([`외 ${plan.offerings.length - courses.length}과목`, '시간표에서 확인']);
+  addAdvisorTable(message, '후보 과목 미리보기', ['과목 (분반)', '교시'], courses);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'button secondary';
+  button.textContent = '시간표 열기';
+  button.addEventListener('click', () => {
+    advisorDialog.close();
+    showSchedule(index);
+    advisorOpen.focus();
+  });
+  message.append(button);
+}
+
+function compareAdvisorCandidate(index, primary) {
+  if (index === primary) {
+    addAdvisorMessage('AI 선배', `${candidateLabel(index)}는 지금 보고 있는 시간표야. 다른 후보 번호를 말해줘.`);
+    return;
+  }
+  const base = scheduleCandidates[primary];
+  const plan = scheduleCandidates[index];
+  const differences = advisorComparison(base, plan, advisorIntent).slice(0, 2);
+  const names = rows => {
+    const preview = rows.slice(0, 2).map(row => `${row.course_name} (${row.section_code})`).join(', ');
+    return rows.length > 2 ? `${preview} 외 ${rows.length - 2}개` : preview || '없음';
+  };
+  const added = plan.offerings.filter(row => !base.offerings.some(previous => previous.offering_id === row.offering_id));
+  const removed = base.offerings.filter(row => !plan.offerings.some(next => next.offering_id === row.offering_id));
+  if (added.length || removed.length) differences.push(['바뀌는 과목·분반', names(removed), names(added)]);
+  const label = `${candidateLabel(index)}로 바꿀 때 주요 차이야.`;
+  const message = addAdvisorMessage('AI 선배', differences.length ? label : '두 후보에서 달라지는 항목은 없어.');
+  addAdvisorTable(message, '시간표 차이', ['항목', '현재 시간표', candidateLabel(index)], differences);
+}
+
+const advisorGraduationStatusOrder = {not_met:0, needs_review:1, met:2};
+
+function advisorGraduationPriority(rule) {
+  if (rule.id === 'total') return 0;
+  if (rule.id === 'major') return 1;
+  if (rule.type === 'min_regular_terms') return 2;
+  if (rule.recommendation_group === 'current_major_required') return 3;
+  return 4;
+}
+
+function showAdvisorGraduation(index, detailed) {
+  const plan = scheduleCandidates[index];
+  const rules = graduationRequirements.map(rule => {
+    const change = projectedRequirement(plan, rule);
+    return {rule, after:change?.after ?? rule, conditional:change?.conditional, changed:Boolean(change)};
+  });
+  const pending = rules.filter(({after}) => after.status === 'not_met').length;
+  const review = rules.filter(({after}) => after.status === 'needs_review').length;
+  const relevant = rules.filter(({after, changed}) => after.status !== 'met' || (detailed && changed))
+    .sort((a, b) => Number(a.after.status === 'met') - Number(b.after.status === 'met')
+      || advisorGraduationPriority(a.rule) - advisorGraduationPriority(b.rule)
+      || advisorGraduationStatusOrder[a.after.status] - advisorGraduationStatusOrder[b.after.status]);
+  const assumption = eligibilityChecks(plan).length ? '자격 확인이 끝난 과목만 이수한다고 보면' : '과목을 모두 이수한다고 보면';
+  const remaining = [pending && `미충족 ${pending}개`, review && `확인 필요 ${review}개`].filter(Boolean).join(', ');
+  const label = `${candidateLabel(index)}에서 ${assumption}, ${remaining ? `${remaining}가 남아.` : '남는 졸업요건은 없어.'}`;
+  const display = (rule, outcome) => `${advisorStatus[outcome.status]}${outcome.current === null ? '' : ` · ${outcome.current}/${rule.target}`}`;
+  const visible = detailed ? relevant : relevant.slice(0, 3);
+  const message = addAdvisorMessage('AI 선배', label);
+  addAdvisorTable(message, detailed ? '남은 요건과 달라지는 요건' : '우선 확인할 졸업요건',
+    detailed ? ['요건', '현재', '이수 후 예상'] : ['요건', '이수 후 예상'], visible.map(({rule, after, conditional}) => {
+      const checked = detailed && conditional && (conditional.status !== after.status || conditional.current !== after.current);
+      const outcome = display(rule, after) + (checked ? `\n분반 자격 확인 후: ${display(rule, conditional)}` : '');
+      return detailed ? [rule.title, display(rule, rule), outcome] : [rule.title, outcome];
+  }));
+  if (!detailed && (relevant.length > visible.length || rules.some(({changed}) => changed))) {
+    const hint = document.createElement('p');
+    hint.className = 'advisor-note';
+    hint.textContent = `전체 변화는 “${candidateLabel(index)} 졸업요건 자세히 보여줘”라고 물어봐.`;
+    message.append(hint);
+  }
+}
+
+function setAdvisorBusy(busy, message = '') {
+  advisorBusy = busy;
+  advisorQuestion.querySelector('button[type="submit"]').disabled = busy || !advisorChatAvailable || !geminiAdvisorAvailable;
+  for (const button of advisorPendingCandidate?.actions.children ?? []) button.disabled = busy;
+  advisorStatusMessage.textContent = message;
+}
+
+const advisorPlanKey = plan => JSON.stringify(plan.offerings.map(row => row.offering_id).sort());
+const advisorCandidateDecisions = {
+  accept:/^(?:추가(?:해(?:\s*줘|\s*주세요)?|하기|할게|하자)?|넣어\s*줘)$/,
+  decline:/^(?:아니(?:요)?|괜찮아(?:요)?|됐어(?:요)?|추가하지\s*마(?:세요)?|건너뛰기|추가\s*안\s*할래)$/,
+};
+
+function advisorCandidateDecision(question, awaitingReply) {
+  const answer = question.replace(/[.!]+$/, '');
+  if (awaitingReply && /^(?:응|네|예|그래)$/.test(answer)) return true;
+  const command = answer.replace(/^(?:(?:응|네|예|그래)[, ]+)?(?:후보(?:를)?\s*)?/, '');
+  if (advisorCandidateDecisions.accept.test(command)) return true;
+  if (advisorCandidateDecisions.decline.test(command)) return false;
+  return null;
+}
+
+function clearAdvisorCandidateOffer() {
+  advisorPendingCandidate?.actions.remove();
+  advisorPendingCandidate = null;
+}
+
+function resolveAdvisorCandidateOffer(accepted) {
+  const {plan, candidates} = advisorPendingCandidate;
+  clearAdvisorCandidateOffer();
+  if (!accepted) {
+    addAdvisorMessage('AI 선배', '알겠어. 추가하지 않을게.');
+    return;
+  }
+  if (candidates !== scheduleCandidates) {
+    addAdvisorMessage('AI 선배', '시간표 목록이 바뀌었어. 새 후보를 다시 찾아줘.');
+    return;
+  }
+  const key = advisorPlanKey(plan);
+  const existing = scheduleCandidates.findIndex(candidate => advisorPlanKey(candidate) === key);
+  if (existing >= 0) {
+    advisorSuggested = [existing];
+    addAdvisorMessage('AI 선배', `이미 ${candidateLabel(existing)}로 들어 있어.`);
+    return;
+  }
+  const index = scheduleCandidates.length;
+  const candidate = {...plan, advisorGenerated:true};
+  scheduleCandidates.push(candidate);
+  const list = $('#schedule-results');
+  list.insertAdjacentHTML('beforeend', scheduleCandidateMarkup(candidate, index));
+  list.scrollTop = list.scrollHeight;
+  $('#schedule-candidate-count').textContent = `후보 ${scheduleCandidates.length}개`;
+  advisorSuggested = [index];
+  addAdvisorMessage('AI 선배', `맨 아래 ${index + 1}위에 추가했어.`);
+}
+
+function advisorWeeklyPreview(plan) {
+  const meetings = plan.offerings.flatMap(course => course.meetings.map(meeting => ({
+    ...meeting, name:course.course_name,
+  })));
+  const rows = [];
+  for (const day of scheduleDays) {
+    const classes = meetings.filter(meeting => meeting.day === day).sort((a, b) => a.start - b.start);
+    if (!classes.length) continue;
+    const courses = classes.map(({start, end, name}) => {
+      const first = Math.floor(start / 2);
+      const last = Math.floor((end - 1) / 2);
+      let period = `${first}`;
+      if (end === start + 1) period += start % 2 ? 'B' : 'A';
+      else if (first !== last) period = `${first}${start % 2 ? 'B' : ''}~${last}${end % 2 ? 'A' : ''}`;
+      return `${period}교시 ${name}`;
+    });
+    rows.push([`${day}요일`, courses.join('\n')]);
+  }
+  return rows;
+}
+
+function offerAdvisorCandidate(plan, intent) {
+  const reason = advisorCandidateReason(plan, intent);
+  const message = addAdvisorMessage('AI 선배', '새 후보를 찾았어. 목록 맨 아래에 추가할까?', reason);
+  const preview = addAdvisorTable(message, '새 후보 주간 시간표', ['요일', '교시 · 과목'], advisorWeeklyPreview(plan));
+  preview?.classList.add('advisor-weekly-preview');
+  const actions = document.createElement('div');
+  actions.className = 'advisor-candidate-actions';
+  advisorPendingCandidate = {plan, candidates:scheduleCandidates, actions};
+  for (const [label, accepted] of [['추가하기', true], ['건너뛰기', false]]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = accepted ? 'button primary' : 'button secondary';
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      advisorInput.focus({preventScroll:true});
+      resolveAdvisorCandidateOffer(accepted);
+    });
+    actions.append(button);
+  }
+  message.append(actions);
+  scrollAdvisorTo(message);
+}
+
+async function generateAdvisorCandidate(intent, revision) {
+  if (!scheduleRequest || !scheduleSnapshot) {
+    addAdvisorMessage('AI 선배', '시간표 화면에서 먼저 후보를 만들고 다시 요청해줘.');
+    return;
+  }
+  clearAdvisorCandidateOffer();
+  const base = scheduleRequest;
+  const request = {
+    ...base,
+    blocked_days:[...new Set([...base.blocked_days, ...intent.days_off])],
+    min_credits:intent.min_credits ?? Math.min(base.min_credits, intent.max_credits ?? 30),
+    max_credits:intent.max_credits ?? Math.max(base.max_credits, intent.min_credits ?? 1),
+    sort:{days:'fewest_days', gaps:'least_gap'}[intent.priorities[0]] ?? base.sort,
+  };
+  setAdvisorBusy(true, '새 시간표 후보를 찾고 있어…');
+  advisorTranscript.scrollTop = advisorTranscript.scrollHeight;
+  const result = await api('/api/schedules', request);
+  if (revision !== advisorRevision) return;
+  if (result.target_term !== scheduleSnapshot.term
+      || result.snapshot?.snapshot_id !== scheduleSnapshot.id
+      || result.snapshot?.sha256 !== scheduleSnapshot.sha256) {
+    throw new Error('개설 자료가 바뀌었어. 시간표 화면에서 다시 생성해줘.');
+  }
+  const known = new Set(scheduleCandidates.map(advisorPlanKey));
+  const alternative = result.candidates
+    .filter(plan => !known.has(advisorPlanKey(plan)) && matchesAdvisorConstraints(plan, intent))
+    .sort((a, b) => compareAdvisorPlans(a, b, intent))[0];
+  if (!alternative) {
+    const explanation = result.search_status === 'truncated' || result.outcome === 'undetermined'
+      ? '찾아본 범위에서는 새 후보를 못 찾았어.' : '이 조건으로 추가할 새 후보를 못 찾았어.';
+    addAdvisorMessage('AI 선배', explanation, result.issues[0]);
+    return;
+  }
+  offerAdvisorCandidate(alternative, intent);
+}
+
+function resetAdvisorConversation() {
+  advisorRevision++;
+  advisorContent.classList.remove('is-chatting');
+  advisorTranscript.hidden = true;
+  $('#advisor-examples').hidden = false;
+  $('#advisor-examples').open = false;
+  advisorInput.placeholder = '이대로 들으면 졸업까지 뭐가 남아?';
+  advisorQuestion.reset();
+  clearAdvisorCandidateOffer();
+  advisorChat.replaceChildren();
+  advisorIntent = null;
+  advisorTopic = null;
+  advisorSuggested = [];
+  setAdvisorBusy(false);
+}
+
+advisorOpen.addEventListener('click', () => {
+  if (advisorDialog.open) return;
+  advisorPrimary = scheduleCandidates.indexOf(selectedSchedule);
+  const canCompare = advisorPrimary >= 0 && graduationRequirements.length > 0;
+  $('#advisor-empty').hidden = canCompare;
+  advisorContent.hidden = !canCompare;
+  if (!canCompare) {
+    $('#advisor-schedule-link').hidden = schedulePage;
+    $('#advisor-return-form').hidden = !schedulePage;
+    $('#advisor-empty-message').textContent = geminiAdvisorAvailable === null
+      ? '연결된 서버가 AI 학과 선배를 지원하지 않아요. 프로젝트 폴더에서 최신 서버를 실행한 뒤, 터미널에 표시된 주소로 접속해 주세요.'
+      : '시간표를 먼저 만들어 봐. 후보를 비교하거나 이번 학기를 마치면 졸업요건이 얼마나 남을지 같이 볼 수 있어.';
+    advisorDialog.showModal();
+    return;
+  }
+  const connectionNote = $('#advisor-connection-note');
+  connectionNote.hidden = advisorChatAvailable && geminiAdvisorAvailable === true;
+  connectionNote.textContent = !advisorChatAvailable
+    ? '대화 기능을 사용하려면 최신 서버로 다시 시작하고 새로고침해 주세요.'
+    : '서버에 Gemini API 키가 없어 보내기를 사용할 수 없어요. 서버를 종료하고 python -B -m intake_app.server --prompt-gemini-key로 다시 실행해 주세요.';
+  $('#advisor-primary').textContent = `${candidateLabel(advisorPrimary)} · ${advisorPlanSummary(scheduleCandidates[advisorPrimary])}`;
+  setAdvisorBusy(advisorBusy, advisorStatusMessage.textContent);
+  advisorDialog.showModal();
+  advisorInput.focus({preventScroll:true});
+  advisorTranscript.scrollTop = advisorTranscript.scrollHeight;
+});
+advisorDialog.addEventListener('click', event => {
+  const example = event.target.closest('[data-advisor-example]');
+  if (example) {
+    advisorInput.value = example.textContent.trim();
+    advisorInput.focus();
+  }
+});
+advisorQuestion.addEventListener('submit', async event => {
+  event.preventDefault();
+  const question = advisorInput.value.trim();
+  if (!question || advisorBusy || !advisorChatAvailable || !geminiAdvisorAvailable) return;
+  const revision = ++advisorRevision;
+  const primary = advisorPrimary;
+  advisorContent.classList.add('is-chatting');
+  advisorTranscript.hidden = false;
+  $('#advisor-examples').hidden = true;
+  advisorInput.placeholder = '이어서 물어봐';
+  advisorInput.value = '';
+  advisorInput.focus({preventScroll:true});
+  const awaitingCandidateReply = advisorPendingCandidate?.actions.parentElement === advisorChat.lastElementChild;
+  addAdvisorMessage('나', question);
+  if (advisorPendingCandidate) {
+    const accepted = advisorCandidateDecision(question, awaitingCandidateReply);
+    if (accepted !== null) {
+      resolveAdvisorCandidateOffer(accepted);
+      return;
+    }
+  }
+  setAdvisorBusy(true, '질문을 읽고 있어…');
+  advisorTranscript.scrollTop = advisorTranscript.scrollHeight;
+  try {
+    const {intent, reply} = await api('/api/advisor/chat', {
+      question, previous_intent:advisorIntent, previous_topic:advisorTopic,
+    });
+    if (revision !== advisorRevision) return;
+    const {action, target} = intent;
+    if (action === 'chat' || action === 'clarify') {
+      addAdvisorMessage('AI 선배', reply);
+      return;
+    }
+    advisorTopic = action;
+    if (action === 'compare' || action === 'generate') {
+      advisorIntent = intent;
+      if (action === 'compare') suggestAdvisorCandidate(intent, primary);
+      else await generateAdvisorCandidate(intent, revision);
+      return;
+    }
+    if (action === 'current') {
+      addAdvisorMessage('AI 선배', `${candidateLabel(primary)}야. ${advisorPlanSummary(scheduleCandidates[primary])}.`);
+      return;
+    }
+    if (target === -1 && advisorSuggested.length === 2) {
+      const [first, second] = advisorSuggested.map(candidateLabel);
+      const followup = action === 'difference' ? `${first}랑 비교해줘`
+        : action === 'show' ? `${first} 보여줘` : `${first} 졸업요건 보여줘`;
+      addAdvisorMessage('AI 선배', `${first}와 ${second} 중 어느 쪽이야? “${followup}”처럼 물어봐.`);
+      return;
+    }
+    const index = target === -1 ? advisorSuggested[0] : target === 0 ? primary : target - 1;
+    if (!scheduleCandidates[index]) {
+      addAdvisorMessage('AI 선배', target === -1 ? '아직 가리킬 후보가 없어. 몇 번 후보인지 알려줘.'
+        : `${target}번 후보는 목록에 없어. 지금은 ${scheduleCandidates.length}개 후보가 있어.`);
+      return;
+    }
+    if (target > 0) advisorSuggested = [index];
+    if (action === 'show') showAdvisorCandidate(index);
+    else if (action === 'difference') compareAdvisorCandidate(index, primary);
+    else showAdvisorGraduation(index, action === 'graduation_details');
+  } catch (error) {
+    if (revision === advisorRevision) {
+      addAdvisorMessage('안내', error.message);
+      if (!advisorInput.value) advisorInput.value = question;
+    }
+  } finally {
+    if (revision === advisorRevision) {
+      setAdvisorBusy(false);
+    }
+  }
+});
+
+function scheduleCandidateMarkup(plan, index) {
+  return `<button type="button"
+    class="schedule-candidate${!plan.advisorGenerated && index < 3 ? ' rank-' + (index + 1) : ''}" data-schedule-index="${index}" aria-pressed="false">
+    <strong class="schedule-rank">${index + 1}위</strong>
+    <span><strong>${plan.credits}학점 · 수업 ${scheduleClassDays(plan).join("·")} (${plan.days}일)</strong>
+      <small>${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)}${plan.provisional ? ' · 잠정' : ''}${plan.advisorGenerated ? ' · AI 선배 추가' : ''}</small></span>
+  </button>`;
+}
+
 function renderSchedules(result) {
   scheduleCandidates = result.candidates;
+  graduationRequirements = result.graduation_requirements ?? [];
   const found = scheduleCandidates.length > 0;
-  $('#schedule-status').textContent = [result.target_term,
-    found ? `후보 ${scheduleCandidates.length}개` :
-      result.outcome === 'undetermined' ? '편성 가능 여부 확인 필요' : '생성 가능한 시간표 없음',
-    ...result.issues].join(' · ');
+  const status = $('#schedule-status');
+  const count = document.createElement('span');
+  count.id = 'schedule-candidate-count';
+  count.textContent = found ? `후보 ${scheduleCandidates.length}개`
+    : result.outcome === 'undetermined' ? '편성 가능 여부 확인 필요' : '생성 가능한 시간표 없음';
+  status.replaceChildren(`${result.target_term} · `, count);
+  if (result.issues.length) status.append(` · ${result.issues.join(' · ')}`);
   $('#schedule-form').hidden = found;
   $('#schedule-candidates').hidden = !found;
   if (!found) {
@@ -1576,12 +2357,7 @@ function renderSchedules(result) {
     return;
   }
   const list = $('#schedule-results');
-  list.innerHTML = scheduleCandidates.map((plan, index) => `<button type="button"
-    class="schedule-candidate${index < 3 ? ' rank-' + (index + 1) : ''}" data-schedule-index="${index}" aria-pressed="false">
-    <strong class="schedule-rank">${index + 1}위</strong>
-    <span><strong>${plan.credits}학점 · 수업 ${scheduleClassDays(plan).join("·")} (${plan.days}일)</strong>
-      <small>${scheduleCourseMix(plan)} · ${scheduleSpacing(plan)}${plan.provisional ? ' · 잠정' : ''}</small></span>
-  </button>`).join('');
+  list.innerHTML = scheduleCandidates.map(scheduleCandidateMarkup).join('');
   list.scrollTop = 0;
   showSchedule(0);
   list.querySelector('button').focus({preventScroll:true});
@@ -1599,6 +2375,7 @@ $('#edit-schedule-conditions').addEventListener('click', () => {
 });
 
 function showScheduleConditions() {
+  clearSelectedSchedule();
   renderScheduleAnalytics(null);
   $('#schedule-candidates').hidden = true;
   $('#schedule-form').hidden = false;
@@ -1710,6 +2487,8 @@ $('#schedule-form').addEventListener('submit', async event => {
   if (button.disabled) return;
   closeScheduleSections(false);
   button.disabled = true;
+  clearSelectedSchedule();
+  resetAdvisorConversation();
   $('#schedule-results').replaceChildren();
   renderScheduleAnalytics(null);
   $('#schedule-offerings').hidden = true;
@@ -1723,16 +2502,20 @@ $('#schedule-form').addEventListener('submit', async event => {
     const basket = readBasket();
     const excluded = basket.filter(row => row.scheduleMode === 'excluded').map(row => row.code);
     if (excluded.length && !supportsScheduleExclusions) throw new Error('과목 제외를 적용할 수 없어요.');
-    const result = await api('/api/schedules', {
+    const request = {
       version:latest.version,
       min_credits:Number($('#schedule-min').value), max_credits:Number($('#schedule-max').value),
       required:basket.filter(row => !row.offeringId && row.scheduleMode === 'required').map(row => row.code),
       locked_offering_ids:basket.filter(row => row.offeringId).map(row => row.offeringId),
       preferred:basket.filter(row => !row.offeringId && row.scheduleMode === 'preferred').map(row => row.code),
       excluded,
+      allow_late_classes:$('#schedule-allow-late').checked,
       blocked_days:[...document.querySelectorAll('[name="blocked-day"]:checked')].map(row => row.value),
       sort:$('#schedule-sort').value,
-    });
+    };
+    const result = await api('/api/schedules', request);
+    scheduleRequest = request;
+    scheduleSnapshot = {term:result.target_term, id:result.snapshot?.snapshot_id, sha256:result.snapshot?.sha256};
     renderSchedules(result);
   } catch (error) {
     $('#schedule-status').textContent = error.message;

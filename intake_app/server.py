@@ -1,16 +1,21 @@
 """Run with python -m intake_app.server. Local single-user prototype, not public hosting."""
 import argparse
+from errno import EADDRINUSE
+from getpass import GetPassWarning, getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
+import socket
 import sqlite3
 from threading import Lock
 from time import monotonic
 from urllib.parse import urlsplit
+import warnings
 
 from everytime_import.importer import ImportFailure, collect
 
+from .advisor import AdvisorError, GeminiAdvisor, TASK_ACTIONS, valid_intent
 from .domain import ValidationError, ensure, validate_document, document_warnings
 from .imports import apply_import, check_import_sources, prepare_import, replace_import
 from .offerings import compare_offerings
@@ -32,6 +37,13 @@ SCHEDULE_ACTIONS = {
 
 class Application(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = not hasattr(socket, 'SO_EXCLUSIVEADDRUSE')
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
     def __init__(self, address, database, official_db=OFFICIAL_DB, *, collector=collect, ratings_db=RATINGS_DB):
         paths = [Path(path).resolve() for path in (database, official_db, ratings_db) if path is not None]
         if len(set(paths)) != len(paths):
@@ -42,6 +54,7 @@ class Application(ThreadingHTTPServer):
         self.collector = collector
         self.import_lock = Lock()
         self.previews = {}
+        self.advisor = GeminiAdvisor()
         self.token = secrets.token_urlsafe(32)
         super().__init__(address, Handler)
 
@@ -89,6 +102,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, {
                 'csrf_token': self.server.token,
                 'schedule_course_exclusions': True,
+                'gemini_advisor': self.server.advisor.available,
+                'advisor_chat': True,
                 'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
                 'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
             })
@@ -104,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {'error': '앱을 새로고침한 뒤 다시 시도해주세요.'})
         path = urlsplit(self.path).path
         if path not in ('/api/input', '/api/import/preview', '/api/import/apply', '/api/offerings/compare',
-                        '/api/recommendations') and path not in SCHEDULE_ACTIONS:
+                        '/api/recommendations', '/api/advisor/chat') and path not in SCHEDULE_ACTIONS:
             return self.respond(404, {'error': '경로를 찾을 수 없습니다.'})
         try:
             self.connection.settimeout(110)
@@ -113,6 +128,16 @@ class Handler(BaseHTTPRequestHandler):
             ensure(0 < length <= MAX_BODY, '요청이 비어 있거나 너무 큽니다.')
             value = json.loads(self.rfile.read(length))
             ensure(isinstance(value, dict), '요청 형식 오류')
+            if path == '/api/advisor/chat':
+                question = value.get('question')
+                previous = value.get('previous_intent')
+                topic = value.get('previous_topic')
+                fields = set(value)
+                ensure({'question', 'previous_intent'} <= fields <= {'question', 'previous_intent', 'previous_topic'}
+                       and (topic is None or topic in TASK_ACTIONS) and isinstance(question, str)
+                       and 1 <= len(question.strip()) <= 400
+                       and (previous is None or valid_intent(previous)), '질문 형식을 확인해주세요.')
+                return self.respond(200, self.server.advisor.ask(question.strip(), previous, topic))
             version = value.get('version')
             ensure(type(version) is int and version >= 0, '저장 버전 오류')
             if path == '/api/import/preview':
@@ -150,6 +175,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, dict(**result, document=document, warnings=document_warnings(document)))
         except ConflictError as exc:
             return self.respond(409, {'error': str(exc)})
+        except AdvisorError as exc:
+            return self.respond(exc.status, {'error': str(exc)})
         except (ValidationError, ImportFailure, ValueError, TypeError) as exc:
             return self.respond(400, {'error': str(exc) if isinstance(exc, (ValidationError, ImportFailure))
                                       else '입력 형식을 확인해주세요.'})
@@ -235,10 +262,28 @@ def main():
     parser.add_argument('--db', type=Path, default=BASE / 'runtime' / 'student_inputs.sqlite')
     parser.add_argument('--official-db', type=Path, default=OFFICIAL_DB)
     parser.add_argument('--ratings-db', type=Path, default=RATINGS_DB)
+    parser.add_argument('--prompt-gemini-key', action='store_true', help='서버를 시작할 때 Gemini API 키를 가려서 입력합니다.')
     args = parser.parse_args()
-    server = Application(('127.0.0.1', args.port), args.db, args.official_db, ratings_db=args.ratings_db)
-    print(f'Local: http://127.0.0.1:{server.server_port}', flush=True)
     try:
+        server = Application(('127.0.0.1', args.port), args.db, args.official_db, ratings_db=args.ratings_db)
+    except OSError as exc:
+        if getattr(exc, 'winerror', None) not in (10013, 10048) and exc.errno != EADDRINUSE:
+            raise
+        parser.exit(1, f'포트 {args.port}를 열 수 없습니다. 기존 서버가 실행 중이면 종료하고 다시 실행하세요.\n')
+    try:
+        if args.prompt_gemini_key:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter('error', GetPassWarning)
+                    key = getpass('Gemini API 키: ').strip()
+            except (EOFError, GetPassWarning):
+                parser.exit(1, '키를 가려서 입력할 수 있는 터미널에서 실행해주세요.\n')
+            if not key:
+                parser.exit(1, 'Gemini API 키를 입력해주세요.\n')
+            server.advisor.key = key
+        print(f'Local: http://127.0.0.1:{server.server_port}', flush=True)
+        advisor_status = 'API 키 설정됨' if server.advisor.available else 'API 키 없음'
+        print(f'AI 학과 선배: {advisor_status}', flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass

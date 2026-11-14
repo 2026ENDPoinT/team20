@@ -17,8 +17,42 @@ from .recommendations import recommend
 DAYS = "월화수목금토일"
 BLOCK = re.compile(r"([월화수목금토일])\(([^)]+)\)")
 RANGE = re.compile(r"(\d{1,2})([AB])?(?:\s*[~～-]\s*(\d{1,2})([AB])?)?")
-MAX_CANDIDATES = 15
+MAX_CANDIDATES = 6
+CANDIDATE_POOL_SIZE = 96
+LATE_PERIOD_START = 11
 SORTS = {"recommended", "fewest_days", "least_gap"}
+
+
+def select_schedule_candidates(plans):
+    ranked = sorted(plans, key=lambda key: plans[key][0])
+    if not ranked:
+        return []
+
+    course_sets = {key: frozenset(key) for key in ranked}
+
+    def academic_tier(key):
+        order, plan = plans[key]
+        return order[:2], order[3], plan["credits"], plan["provisional"]
+
+    selected = [ranked.pop(0)]
+    while ranked and len(selected) < MAX_CANDIDATES:
+        tier = academic_tier(ranked[0])
+
+        def highest_overlap(key):
+            courses = course_sets[key]
+            return max(len(courses & course_sets[previous]) / len(courses | course_sets[previous])
+                       for previous in selected)
+
+        eligible = [key for key in ranked if academic_tier(key) == tier]
+        if len(selected) >= MAX_CANDIDATES - 2:
+            # Reserve two slots for alternatives with the same credits and reliability.
+            _, best_plan = plans[selected[0]]
+            eligible = [key for key in ranked if plans[key][1]["credits"] == best_plan["credits"]
+                        and plans[key][1]["provisional"] == best_plan["provisional"]] or eligible
+        candidate = min(eligible, key=highest_overlap)
+        selected.append(candidate)
+        ranked.remove(candidate)
+    return [plans[key][1] for key in selected]
 
 
 def parse_meetings(schedule):
@@ -122,7 +156,7 @@ def search_schedule_courses(database, document, request, *, ratings_db=None):
     query = normalized_name(query)
     ensure(query, "강좌코드 또는 강좌명을 입력해주세요.")
     lecture_code = LECTURE_CODE.fullmatch(query)
-    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    result, pool, *_ = basket_schedule_context(database, document, ratings_db=ratings_db)
     matches = {}
     for row in pool:
         code, name, credits = row["course_code"], row["course_name"], row["credits"]
@@ -153,7 +187,7 @@ def search_schedule_courses(database, document, request, *, ratings_db=None):
 
 def basket_sections(database, document, request, *, ratings_db=None):
     codes = request_codes(request, "courses")
-    result, pool, _, _, _ = basket_schedule_context(database, document, ratings_db=ratings_db)
+    result, pool, *_ = basket_schedule_context(database, document, ratings_db=ratings_db)
     courses = {}
     for row in pool:
         code = row["course_code"]
@@ -166,7 +200,41 @@ def basket_sections(database, document, request, *, ratings_db=None):
     return dict(target_term=result["target_term"], courses=courses)
 
 
-def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None):
+def project_schedule(plan, official, baseline, project):
+    planned = [official[row["offering_id"]] for row in plan["offerings"]]
+    confirmed = [row for row in planned if row["eligibility"] != "needs_review"]
+    after = project(confirmed)
+    conditional = project(planned) if len(confirmed) != len(planned) else after
+    changes = {
+        row["id"]: dict(after=dict(current=next_row["current"], status=next_row["status"]),
+                        conditional=dict(current=all_row["current"], status=all_row["status"]),
+                        offering_ids=[])
+        for row, next_row, all_row in zip(baseline, after, conditional)
+        if (row["current"], row["status"]) != (next_row["current"], next_row["status"])
+        or (row["current"], row["status"]) != (all_row["current"], all_row["status"])
+    }
+    if changes:
+        # Attribute a change only when removing the section actually changes the rule result.
+        for offering in planned:
+            remaining = [row for row in planned if row is not offering]
+            if offering in confirmed:
+                scenarios = [(conditional, remaining)] if after is conditional else [
+                    (conditional, remaining), (after, [row for row in confirmed if row is not offering]),
+                ]
+            else:
+                scenarios = [(conditional, remaining)]
+            affected = set()
+            for expected, sections in scenarios:
+                for row, without in zip(expected, project(sections)):
+                    if (row["current"], row["status"]) != (without["current"], without["status"]):
+                        affected.add(row["id"])
+            for rule_id in changes.keys() & affected:
+                changes[rule_id]["offering_ids"].append(offering["offering_id"])
+    return changes
+
+
+def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings_db=None,
+             include_graduation_projection=True):
     student = document["student"]
     lower = request.get("min_credits")
     upper = request.get("max_credits")
@@ -184,6 +252,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
            and all(isinstance(item, str) and 0 < len(item) <= 100 for item in locked),
            "고정 분반 목록을 확인해주세요.")
     locked = {item for item in locked if item.partition(":")[2].partition(":")[0] not in excluded}
+    allow_late_classes = request.get("allow_late_classes", False)
+    ensure(type(allow_late_classes) is bool, "늦은 수업 포함 설정을 확인해주세요.")
     blocked = request.get("blocked_days", [])
     ensure(isinstance(blocked, list) and all(isinstance(day, str) and day in tuple(DAYS) for day in blocked),
            "제외할 요일을 확인해주세요.")
@@ -191,7 +261,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     ensure(isinstance(sort, str) and sort in SORTS, "정렬 기준을 확인해주세요.")
 
     document = dict(document, student=dict(student, target_term=None, recognition_notes=""))
-    result, pool, alternatives, deficits, restricted = recommend(
+    result, pool, alternatives, deficits, restricted, project = recommend(
         database, document, schedule_context=True, ratings_db=ratings_db)
     candidates = {row["course_code"]: row for row in result["candidates"]}
     rules = {rule["id"]: rule for rule in result["requirements"]}
@@ -205,6 +275,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     aliases, distances = building_data()
     options = defaultdict(list)
     unknown_times = set()
+    late_sections = {}
+    late_courses = set()
     for section in pool:
         code = section["course_code"]
         if code in excluded:
@@ -225,6 +297,10 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             unknown_times.add(code)
             continue
         if any(m["day"] in blocked for m in meetings):
+            continue
+        if not allow_late_classes and any(m["end"] > 2 * LATE_PERIOD_START for m in meetings):
+            late_sections[section["offering_id"]] = section
+            late_courses.add(code)
             continue
         mask = 0
         for meeting in meetings:
@@ -255,6 +331,13 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             response["issues"].append(
                 f"고정 분반 {section['course_code']}-{section['section_code']} 수강 불가 ({section['reason']})")
         return dict(response, outcome="no_feasible_plan", search_status="complete")
+    if late_locks := locked & late_sections.keys():
+        for offering_id in sorted(late_locks):
+            section = late_sections[offering_id]
+            response["issues"].append(
+                f"고정 분반 {section['course_name']} {section['section_code']}은 11교시부터 이어지는 시간이 있습니다. "
+                "늦은 수업 포함을 선택하거나 분반 고정을 해제해주세요.")
+        return dict(response, outcome="no_feasible_plan", search_status="complete")
     available_ids = {option.section["offering_id"] for items in options.values() for option in items}
     if locked - available_ids:
         response["issues"] = ["고정한 분반의 시간, 학점, 개설 여부 또는 수강 조건을 확인해주세요."]
@@ -275,7 +358,9 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             restrictions_by_code[section["course_code"]].add(section["reason"])
         for code in sorted(missing):
             reasons = restrictions_by_code.get(code)
-            if reasons and code not in pool_codes:
+            if code in late_courses:
+                response["issues"].append(f"필수 과목 {code}의 늦은 분반을 편성하려면 늦은 수업 포함을 선택해주세요.")
+            elif reasons and code not in pool_codes:
                 response["issues"].append(f"필수 과목 {code}의 분반은 수강 대상에서 제외됩니다. {' / '.join(sorted(reasons))}")
             else:
                 response["issues"].append(f"필수 과목 {code}의 편성 가능한 분반이 없습니다.")
@@ -326,6 +411,9 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     used_selection_groups = set()
     low, high = lower * 100, upper * 100
     max_required = len(required)
+    skipped = set()
+    node_limit = max_nodes
+    deadline = start + seconds
 
     def record(mask, units):
         days = gaps = 0
@@ -362,7 +450,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
                   tuple(sorted(item.section["offering_id"] for item in chosen)))
         if key in plans and plans[key][0] <= order:
             return
-        if key not in plans and len(plans) == MAX_CANDIDATES:
+        if key not in plans and len(plans) == CANDIDATE_POOL_SIZE:
             worst = max(plans, key=lambda entry: plans[entry][0])
             if plans[worst][0] <= order:
                 return
@@ -376,7 +464,7 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
     def search(index, mask, units):
         nonlocal nodes, truncated
         nodes += 1
-        if nodes > max_nodes or monotonic() - start > seconds:
+        if nodes > node_limit or monotonic() > deadline:
             truncated = True
             return
         if units + remaining[index] < low:
@@ -386,6 +474,8 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
         for position in range(index, len(keys)):
             if truncated or units + remaining[position] < low:
                 return
+            if keys[position] in skipped:
+                continue
             groups = selection_groups.get(keys[position], ())
             for item in options[keys[position]]:
                 if (units + item.units > high or mask & item.mask or item.group in used
@@ -403,8 +493,42 @@ def generate(database, document, request, *, max_nodes=60000, seconds=2, ratings
             if position < max_required:
                 break
 
+    # A depth-first pass can spend its entire budget on one early course combination.
+    # Keep part of the budget for passes that omit different optional courses.
+    deadline = start + seconds * 0.65
+    node_limit = max_nodes * 65 // 100
     search(0, 0, 0)
-    response["candidates"] = [plan for _, plan in sorted(plans.values(), key=lambda pair: pair[0])]
+    hit_limit = truncated
+    if truncated and plans:
+        combined = plans
+        best = min(combined, key=lambda key: combined[key][0])
+        optional = [code for code in keys if code in best and code not in required]
+        pairs = [set(optional[i:i + 2]) for i in range(0, len(optional), 2)][:3]
+        for index, skipped in enumerate(pairs, start=1):
+            fraction = 0.65 + 0.35 * index / len(pairs)
+            deadline = start + seconds * fraction
+            node_limit = int(max_nodes * fraction)
+            truncated = False
+            plans = {}
+            search(0, 0, 0)
+            for key, entry in plans.items():
+                if key not in combined or entry[0] < combined[key][0]:
+                    combined[key] = entry
+        plans = combined
+    elif truncated:
+        deadline = start + seconds
+        node_limit = max_nodes
+        truncated = False
+        search(0, 0, 0)
+        hit_limit = truncated
+    truncated = hit_limit
+    response["candidates"] = select_schedule_candidates(plans)
+    if response["candidates"] and include_graduation_projection:
+        baseline = result["requirements"]
+        official = {row["offering_id"]: row for row in pool}
+        response["graduation_requirements"] = baseline
+        for plan in response["candidates"]:
+            plan["graduation_projection"] = project_schedule(plan, official, baseline, project)
     if truncated:
         response["issues"].append("탐색 한도 안에서 찾은 결과입니다.")
     if not plans and unknown_times:

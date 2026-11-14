@@ -10,6 +10,7 @@
       <a id="home-nav" href="/">홈</a>
       <a id="recommend-nav" href="/recommendations">과목 추천</a>
       <a id="schedule-nav" href="/schedules">시간표 생성</a>
+      <button id="open-schedule-advisor" class="nav-button" type="button" aria-haspopup="dialog" hidden>AI 학과 선배</button>
     </nav>
     <button id="open-basket" class="button secondary" type="button" aria-haspopup="dialog"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16l-2 11H6L4 9Zm4 0 4-5 4 5"/></svg>바구니 <span id="basket-count" class="count">0</span></button>
     <button id="my-info" class="button secondary" type="button" aria-haspopup="dialog"><span class="profile-icon" aria-hidden="true"></span>내 정보</button>
@@ -87,6 +88,7 @@
           <fieldset class="interest-group"><legend>수업을 피할 요일</legend>
             <div class="weekday-grid" id="schedule-days"></div>
           </fieldset>
+          <label class="schedule-day"><input id="schedule-allow-late" type="checkbox">늦은 수업 포함 (11교시부터)</label>
         </div>
         <div id="schedule-course-picker" role="tabpanel" aria-labelledby="schedule-basket-tab" tabindex="0">
           <section id="schedule-basket" aria-labelledby="schedule-basket-title">
@@ -131,7 +133,14 @@
       </section>
       </div>
       <section class="card schedule-preview" aria-labelledby="schedule-preview-title">
-        <h2 id="schedule-preview-title">주간 시간표</h2>
+        <div class="schedule-preview-header">
+          <h2 id="schedule-preview-title">주간 시간표</h2>
+          <div class="schedule-preview-actions">
+            <button id="share-schedule-image" type="button" class="button secondary" disabled>이미지 저장</button>
+            <button id="start-registration-practice" class="button secondary" type="button" aria-haspopup="dialog" hidden>수강신청 연습 시작</button>
+          </div>
+        </div>
+        <p id="schedule-share-status" role="status" hidden></p>
         <button id="return-to-schedule-sections" class="button secondary" type="button" hidden>분반 목록으로</button>
         <p id="schedule-preview-summary" role="status"></p>
         <div id="schedule-calendar" class="schedule-calendar"></div>
@@ -143,6 +152,66 @@
       </section>
       </div>
     </section>
+    <dialog id="schedule-advisor" aria-labelledby="schedule-advisor-title">
+      <header class="dialog-header">
+        <h2 id="schedule-advisor-title">AI 학과 선배</h2>
+        <form method="dialog"><button class="button secondary">닫기</button></form>
+      </header>
+      <div class="advisor-body" id="advisor-empty" hidden>
+        <p id="advisor-empty-message"></p>
+        <a id="advisor-schedule-link" class="button primary" href="/schedules">시간표 만들기</a>
+        <form id="advisor-return-form" method="dialog"><button class="button primary">시간표 화면으로</button></form>
+      </div>
+      <div class="advisor-body" id="advisor-content" hidden>
+        <div class="advisor-pair">
+          <p>현재 시간표 <strong id="advisor-primary"></strong></p>
+        </div>
+        <div id="advisor-transcript" tabindex="0" role="region" aria-label="대화 내용" hidden>
+          <div id="advisor-chat" role="log" aria-label="AI 학과 선배와의 대화"></div>
+          <p id="advisor-status" role="status"></p>
+        </div>
+        <form id="advisor-question">
+          <label for="advisor-question-text">후보에 대해 질문하기</label>
+          <div>
+            <input id="advisor-question-text" type="text" maxlength="400" placeholder="이대로 들으면 졸업까지 뭐가 남아?" required>
+            <button class="button primary" type="submit">보내기</button>
+          </div>
+          <details id="advisor-examples">
+            <summary>예시 질문 보기</summary>
+            <button type="button" class="advisor-evidence" data-advisor-example>이대로 들으면 졸업까지 뭐가 남아?</button>
+            <button type="button" class="advisor-evidence" data-advisor-example>금요일을 비우면서 전필도 챙길 수 있어?</button>
+            <button type="button" class="advisor-evidence" data-advisor-example>학교에 덜 오는 시간표가 있어?</button>
+          </details>
+          <p class="advisor-note">질문은 Gemini에서 해석합니다. 이름, 학번, 연락처는 입력하지 마세요.</p>
+          <p id="advisor-connection-note" class="advisor-note" hidden></p>
+        </form>
+      </div>
+    </dialog>
+    <dialog id="registration-practice" aria-labelledby="registration-practice-title">
+      <header class="dialog-header">
+        <div>
+          <h2 id="registration-practice-title">수강신청 연습</h2>
+          <p id="registration-practice-summary"></p>
+        </div>
+        <p class="registration-practice-record">최고 기록 <strong id="registration-practice-best">—</strong></p>
+        <form method="dialog"><button class="button secondary">닫기</button></form>
+      </header>
+      <div class="registration-practice-stage">
+        <div id="registration-practice-calendar" class="schedule-calendar" role="region" aria-label="선택한 주간 시간표" tabindex="0"></div>
+        <div class="registration-practice-controls">
+          <p id="registration-practice-instruction">10시 00분 00초에 신청을 누르세요.</p>
+          <p id="registration-practice-clock" role="timer" aria-label="가상 시계"><span></span> <small></small></p>
+          <div class="registration-practice-actions">
+            <button id="registration-practice-apply" class="button primary" type="button" aria-describedby="registration-practice-instruction" autofocus>신청</button>
+            <button id="registration-practice-retry" class="button secondary" type="button" hidden>다시 연습</button>
+          </div>
+          <p id="registration-practice-result" role="status">
+            <strong id="registration-practice-score" hidden></strong>
+            <span id="registration-practice-feedback"></span>
+          </p>
+        </div>
+      </div>
+    </dialog>
     <dialog id="basket-dialog" aria-labelledby="basket-title">
       <header class="dialog-header"><h2 id="basket-title">과목 바구니</h2><form method="dialog"><button class="button secondary">닫기</button></form></header>
       <div class="basket-content"><div id="basket-list"></div><a class="button primary" href="/schedules">시간표 생성으로 이동</a></div>
@@ -222,5 +291,20 @@
       </div>
     </dialog>
   </main>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <p><strong>수강나침반</strong> · ENDPoinT 해커톤 2026 Team 20</p>
+      <details>
+        <summary>서비스 이용 안내</summary>
+        <p>서울과학기술대학교 컴퓨터공학과 학생을 위한 수강 계획 도구입니다. 추천과 시간표는 참고용이며, 개설 여부와 수강 자격은 학교의 공식 수강신청 시스템에서 확인해주세요.</p>
+      </details>
+      <details>
+        <summary>개인정보 처리 안내</summary>
+        <p id="public-data-handling" hidden>공개 사이트는 입력한 이수내역을 브라우저에 저장합니다. 추천·시간표 생성과 입력 검증에는 입력 정보가 서버로 전송되며, 서버의 학생 DB에는 저장하지 않습니다. 에브리타임 가져오기에 사용한 링크는 조회에 쓰이며, 가져오기 미리보기는 서버 메모리에서 최대 5분 동안 적용할 수 있습니다. 저장된 정보를 지우려면 브라우저의 이 사이트 데이터를 삭제해주세요.</p>
+        <p id="local-data-handling" hidden>로컬 실행에서는 학생 정보를 이 컴퓨터의 앱 데이터베이스에 저장합니다.</p>
+      </details>
+      <a href="https://github.com/2026ENDPoinT/team20">팀 프로젝트 저장소</a>
+    </div>
+  </footer>
 <datalist id="terms"><option value="2024-1"><option value="2024-2"><option value="2025-1"><option value="2025-2"><option value="2026-1"><option value="2026-2"><option value="2027-1"></datalist>
 </body></html>

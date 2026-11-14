@@ -163,6 +163,9 @@ class PublicApp:
             if value.get('automatic_term') is True:
                 document['student'].update(target_term=None, recognition_notes='')
             result = recommend(self.official_db, document, ratings_db=self.ratings_db)
+        elif path == '/api/schedules':
+            result = SCHEDULE_ACTIONS[path](self.official_db, document, value, ratings_db=self.ratings_db,
+                                            include_graduation_projection=False)
         else:
             result = SCHEDULE_ACTIONS[path](self.official_db, document, value, ratings_db=self.ratings_db)
         return dict(result, input_revision=value['version'])
