@@ -1,4 +1,4 @@
-"""Public beta entry point. Student profiles belong to the visitor's browser."""
+﻿"""Public beta entry point. Student profiles belong to the visitor's browser."""
 from contextlib import closing
 from hashlib import sha256
 from http import HTTPStatus
@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from everytime_import.importer import ImportFailure, collect
 
+from .advisor import AdvisorError, GeminiAdvisor, TASK_ACTIONS, valid_intent
 from .domain import ValidationError, document_warnings, ensure, validate_document
 from .imports import prepare_import, replace_import
 from .interest_tags import load_tags
@@ -50,7 +51,7 @@ class PublicApp:
         parsed = urlsplit(origin)
         if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or
                 parsed.password or parsed.path or parsed.query or parsed.fragment):
-            raise ValueError('공개 HTTPS 주소를 설정해주세요.')
+            raise ValueError('공개 HTTPS 주소�??�정?�주?�요.')
         self.origin = origin
         self.host = parsed.netloc.lower()
         self.official_db = Path(official_db)
@@ -61,6 +62,7 @@ class PublicApp:
         self.import_slot = Lock()
         self.preview_lock = Lock()
         self.previews = {}
+        self.advisor = GeminiAdvisor()
         self.static = {path: ((BASE / 'static' / name).read_bytes(), content_type)
                        for path, (name, content_type) in STATIC.items()}
 
@@ -81,7 +83,7 @@ class PublicApp:
         host = env.get('HTTP_HOST', '').lower()
         origin = env.get('HTTP_ORIGIN')
         if host != self.host or (origin and origin != self.origin):
-            return reply(403, {'error': '공식 서비스 주소로 접근해주세요.'})
+            return reply(403, {'error': '공식 ?�비??주소�??�근?�주?�요.'})
         method, path = env['REQUEST_METHOD'], env['PATH_INFO']
         try:
             if method == 'GET':
@@ -100,61 +102,72 @@ class PublicApp:
                         'csrf_token': self.token, 'browser_storage': True,
                         'schedule_course_exclusions': True,
                         'advisor_chat': True,
+                        'gemini_advisor': self.advisor.available,
                         'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
                         'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
                     })
                 if path == '/api/input':
-                    return reply(405, {'error': '공개 버전의 학생 정보는 브라우저에서 관리합니다.'})
-                return reply(404, {'error': '경로를 찾을 수 없습니다.'})
+                    return reply(405, {'error': '공개 버전???�생 ?�보??브라?��??�서 관리합?�다.'})
+                return reply(404, {'error': '경로�?찾을 ???�습?�다.'})
             if method != 'POST':
-                return reply(405, {'error': '지원하지 않는 요청입니다.'})
+                return reply(405, {'error': '지?�하지 ?�는 ?�청?�니??'})
             token = env.get('HTTP_X_APP_TOKEN', '')
             if (origin != self.origin or not token.isascii() or
                     not secrets.compare_digest(token, self.token)):
-                return reply(403, {'error': '페이지를 새로고침한 뒤 다시 시도해주세요.'})
+                return reply(403, {'error': '?�이지�??�로고침?????�시 ?�도?�주?�요.'})
             if path not in SCHEDULE_ACTIONS and path not in (
                 '/api/recommendations', '/api/input', '/api/import/preview',
-                '/api/import/apply', '/api/offerings/compare',
+                '/api/import/apply', '/api/offerings/compare', '/api/advisor/chat',
             ):
-                return reply(404, {'error': '경로를 찾을 수 없습니다.'})
-            ensure(env.get('CONTENT_TYPE', '').split(';')[0] == 'application/json', 'JSON 요청만 지원합니다.')
+                return reply(404, {'error': '경로�?찾을 ???�습?�다.'})
+            ensure(env.get('CONTENT_TYPE', '').split(';')[0] == 'application/json', 'JSON ?�청�?지?�합?�다.')
             length = int(env.get('CONTENT_LENGTH') or '0')
-            ensure(0 < length <= MAX_BODY, '요청이 비어 있거나 너무 큽니다.')
+            ensure(0 < length <= MAX_BODY, '?�청??비어 ?�거???�무 ?�니??')
             value = json.loads(env['wsgi.input'].read(length))
-            ensure(isinstance(value, dict), '요청 형식 오류')
+            ensure(isinstance(value, dict), '?�청 ?�식 ?�류')
             version = value.get('version')
-            ensure(type(version) is int and version >= 0, '입력 버전 오류')
+            ensure(type(version) is int and version >= 0, '?�력 버전 ?�류')
             reviewed = value.get('reviewed', False)
-            ensure(type(reviewed) is bool, '입력 확인 상태 오류')
+            ensure(type(reviewed) is bool, '?�력 ?�인 ?�태 ?�류')
             document = validate_document(value.get('document'), final=path == '/api/input' and reviewed)
             if path == '/api/input':
                 for key in ('min_credits', 'max_credits'):
                     credits = document['student'][key]
-                    ensure(credits is None or credits == int(credits), '희망학점은 정수로 입력해주세요.')
+                    ensure(credits is None or credits == int(credits), '?�망?�점?� ?�수�??�력?�주?�요.')
                 return reply(200, dict(document=document, warnings=document_warnings(document)))
+            if path == '/api/advisor/chat':
+                question = value.get('question')
+                previous = value.get('previous_intent')
+                topic = value.get('topic')
+                ensure(isinstance(question, str)
+                       and 1 <= len(question.strip()) <= 400
+                       and (previous is None or valid_intent(previous)), '질문 형식을 확인해주세요.')
+                return reply(200, self.advisor.ask(question.strip(), previous, topic))
             if path in ('/api/import/preview', '/api/import/apply'):
                 client = env.get('HTTP_X_COURSE_VISITOR', '')
-                ensure(re.fullmatch(r'[a-f0-9-]{36}', client) is not None, '이 브라우저에서 다시 가져와주세요.')
+                ensure(re.fullmatch(r'[a-f0-9-]{36}', client) is not None, '??브라?��??�서 ?�시 가?��?주세??')
                 if path.endswith('/apply'):
                     return reply(200, self.apply_import(client, document, value))
                 if not self.import_slot.acquire(blocking=False):
-                    return reply(429, {'error': '시간표 가져오기가 진행 중입니다. 잠시 뒤 다시 시도해주세요.'})
+                    return reply(429, {'error': '?�간??가?�오기�? 진행 중입?�다. ?�시 ???�시 ?�도?�주?�요.'})
                 try:
                     return reply(200, self.preview_import(client, document, value))
                 finally:
                     self.import_slot.release()
             if not self.compute_slots.acquire(blocking=False):
-                return reply(429, {'error': '요청이 많습니다. 잠시 뒤 다시 시도해주세요.'})
+                return reply(429, {'error': '?�청??많습?�다. ?�시 ???�시 ?�도?�주?�요.'})
             try:
                 return reply(200, self.calculate(path, document, value))
             finally:
                 self.compute_slots.release()
+        except AdvisorError as exc:
+            return reply(exc.status, {'error': str(exc)})
         except (ValidationError, ImportFailure) as exc:
             return reply(400, {'error': str(exc)})
         except (ValueError, TypeError, RecursionError):
-            return reply(400, {'error': '입력 형식을 확인해주세요.'})
+            return reply(400, {'error': '?�력 ?�식???�인?�주?�요.'})
         except (OSError, sqlite3.Error):
-            return reply(503, {'error': '강좌 데이터를 읽을 수 없습니다. 잠시 뒤 다시 시도해주세요.'})
+            return reply(503, {'error': '강좌 ?�이?��? ?�을 ???�습?�다. ?�시 ???�시 ?�도?�주?�요.'})
 
     def calculate(self, path, document, value):
         if path == '/api/offerings/compare':
@@ -173,7 +186,7 @@ class PublicApp:
 
     def preview_import(self, client, document, value):
         url = value.get('shared_url')
-        ensure(isinstance(url, str) and len(url) <= 300, '에브리타임 공유 링크를 확인해주세요.')
+        ensure(isinstance(url, str) and len(url) <= 300, '?�브리�???공유 링크�??�인?�주?�요.')
         collection = self.collect(url, timeout=45, max_tables=20)
         preview, hashes = prepare_import(collection, document, {})
         if value.get('official_only') is True:
@@ -196,15 +209,15 @@ class PublicApp:
 
     def apply_import(self, client, document, value):
         import_id = value.get('import_id')
-        ensure(isinstance(import_id, str), '가져오기 미리보기를 다시 열어주세요.')
+        ensure(isinstance(import_id, str), '가?�오�?미리보기�??�시 ?�어주세??')
         with self.preview_lock:
             item = self.previews.get(import_id)
             ensure(item is not None and item[0] > monotonic() and item[1] == client,
-                   '미리보기가 만료됐습니다. 공유 링크를 다시 가져와주세요.')
+                   '미리보기가 만료?�습?�다. 공유 링크�??�시 가?��?주세??')
             _, _, saved_digest, preview, hashes = item
             ensure(saved_digest == fingerprint(document) and preview['base_revision'] == value['version'],
-                   '학생 입력이 변경됐습니다. 공유 링크를 다시 가져와주세요.')
-            ensure(value.get('replace') is True, '가져올 과목을 다시 선택해주세요.')
+                   '?�생 ?�력??변경됐?�니?? 공유 링크�??�시 가?��?주세??')
+            ensure(value.get('replace') is True, '가?�올 과목???�시 ?�택?�주?�요.')
             replace_import(document, preview, hashes, value.get('accepted_attempt_ids'))
             return dict(document=validate_document(document), warnings=document_warnings(document))
 
