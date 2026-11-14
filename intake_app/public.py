@@ -99,6 +99,7 @@ class PublicApp:
                     return reply(200, {
                         'csrf_token': self.token, 'browser_storage': True,
                         'schedule_course_exclusions': True,
+                        'advisor_chat': True,
                         'interest_tags': [{key: tag[key] for key in ('id', 'label', 'group')} for tag in tags],
                         'interest_aliases': {label: sorted(ids) for label, ids in aliases.items()},
                     })
