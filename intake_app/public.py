@@ -179,7 +179,7 @@ class PublicApp:
             result = recommend(self.official_db, document, ratings_db=self.ratings_db)
         elif path == '/api/schedules':
             result = SCHEDULE_ACTIONS[path](self.official_db, document, value, ratings_db=self.ratings_db,
-                                            include_graduation_projection=False)
+                                            include_graduation_projection=True)
         else:
             result = SCHEDULE_ACTIONS[path](self.official_db, document, value, ratings_db=self.ratings_db)
         return dict(result, input_revision=value['version'])
