@@ -125,6 +125,14 @@ class PublicApp:
             ensure(0 < length <= MAX_BODY, '?�청??비어 ?�거???�무 ?�니??')
             value = json.loads(env['wsgi.input'].read(length))
             ensure(isinstance(value, dict), '?�청 ?�식 ?�류')
+            if path == '/api/advisor/chat':
+                question = value.get('question')
+                previous = value.get('previous_intent')
+                topic = value.get('topic')
+                ensure(isinstance(question, str)
+                       and 1 <= len(question.strip()) <= 400
+                       and (previous is None or valid_intent(previous)), '질문 형식을 확인해주세요.')
+                return reply(200, self.advisor.ask(question.strip(), previous, topic))
             version = value.get('version')
             ensure(type(version) is int and version >= 0, '?�력 버전 ?�류')
             reviewed = value.get('reviewed', False)
@@ -135,14 +143,6 @@ class PublicApp:
                     credits = document['student'][key]
                     ensure(credits is None or credits == int(credits), '?�망?�점?� ?�수�??�력?�주?�요.')
                 return reply(200, dict(document=document, warnings=document_warnings(document)))
-            if path == '/api/advisor/chat':
-                question = value.get('question')
-                previous = value.get('previous_intent')
-                topic = value.get('topic')
-                ensure(isinstance(question, str)
-                       and 1 <= len(question.strip()) <= 400
-                       and (previous is None or valid_intent(previous)), '질문 형식을 확인해주세요.')
-                return reply(200, self.advisor.ask(question.strip(), previous, topic))
             if path in ('/api/import/preview', '/api/import/apply'):
                 client = env.get('HTTP_X_COURSE_VISITOR', '')
                 ensure(re.fullmatch(r'[a-f0-9-]{36}', client) is not None, '??브라?��??�서 ?�시 가?��?주세??')

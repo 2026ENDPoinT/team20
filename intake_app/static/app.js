@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const days = {MON:'월',TUE:'화',WED:'수',THU:'목',FRI:'금',SAT:'토',SUN:'일'};
@@ -86,7 +86,7 @@ async function api(path, payload) {
   if (!browserStorage || path === '/api/config') return requestApi(path, payload);
   const saved = readBrowserProfile();
   if (path === '/api/input' && payload === undefined) return saved;
-  if (saved.version !== payload.version) {
+  if (saved.version !== payload.version && path !== '/api/advisor/chat') {
     throw Object.assign(new Error('다른 창에서 학생 정보를 저장했어요. 새로고침한 뒤 확인해주세요.'), {status:409});
   }
   const result = await requestApi(path, {...payload, document:payload.document ?? saved.document ?? initial()});
